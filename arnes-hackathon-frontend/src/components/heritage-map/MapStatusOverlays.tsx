@@ -27,7 +27,7 @@ const MapStatusOverlays = ({
 
 			{isRecovering && (
 				<div
-					className="absolute right-4 top-14 z-[10] max-w-sm rounded-md border border-amber-500/35 bg-card/95 px-3 py-2 text-sm text-amber-700 shadow-md backdrop-blur-sm"
+					className="absolute right-4 top-36 z-[10] max-w-sm rounded-md border border-amber-500/35 bg-card/95 px-3 py-2 text-sm text-amber-700 shadow-md backdrop-blur-sm"
 					role="status"
 					aria-live="polite"
 				>
@@ -48,7 +48,7 @@ const MapStatusOverlays = ({
 
 			{hasMarkerError && (
 				<div
-					className="absolute right-4 top-14 z-[10] max-w-sm rounded-md border border-destructive/30 bg-card/95 px-3 py-2 text-sm text-destructive shadow-md backdrop-blur-sm"
+					className="absolute right-4 top-36 z-[10] max-w-sm rounded-md border border-destructive/30 bg-card/95 px-3 py-2 text-sm text-destructive shadow-md backdrop-blur-sm"
 					role="alert"
 					aria-live="assertive"
 				>
