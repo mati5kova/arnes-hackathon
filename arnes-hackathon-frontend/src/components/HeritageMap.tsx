@@ -1,3 +1,4 @@
+import { useLanguage } from "@/lib/i18n";
 import type { HeritageSiteSummary } from "@/types/heritage";
 import type { OverlayKind } from "@/types/overlays";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +35,7 @@ import { useHeritageMapData } from "./heritage-map/use-heritage-map-data";
 const SiteDialog = lazy(() => import("./SiteDialog"));
 
 const HeritageMap = () => {
+	const { m } = useLanguage();
 	const [searchParams, setSearchParams] = useSearchParams();
 	const ignoreMapUrlStateRef = useRef(shouldIgnoreMapUrlStateOnMount());
 	const initialUrlStateRef = useRef(
@@ -206,8 +208,8 @@ const HeritageMap = () => {
 	// Keep recovery banner visible during retry-delay gaps to avoid a brief hard-error flash before success.
 	const isRetryingBackendStartup = noMarkerDataLoaded && (hasTransientMarkerFailures || Boolean(healthError));
 	const showRecoveryBanner = isRecoveringFromError || isWaitingForDataset || isRetryingBackendStartup;
-	const markerRecoveryMessage = getMarkerRecoveryMessage(markerError ?? healthError, healthStatus);
-	const markerRecoveryDetails = getMarkerRecoveryDetails(healthStatus);
+	const markerRecoveryMessage = getMarkerRecoveryMessage(markerError ?? healthError, healthStatus, m.map.recovery);
+	const markerRecoveryDetails = getMarkerRecoveryDetails(healthStatus, m.map.recovery);
 	const isRetryNowDisabled = markersQuery.isFetching && healthQuery.isFetching;
 	const overlayAreas = overlayGrid?.areas ?? [];
 	const overlayCells = overlayGrid?.cells ?? [];
@@ -223,7 +225,7 @@ const HeritageMap = () => {
 	};
 
 	return (
-		<div className="relative h-full flex-1" role="region" aria-label="Heritage map and search">
+		<div className="relative h-full flex-1" role="region" aria-label={m.map.containerAria}>
 			<MapSearchBox
 				searchQuery={searchQuery}
 				onSearchQueryChange={setSearchQuery}
@@ -235,8 +237,7 @@ const HeritageMap = () => {
 			/>
 
 			<p id={MAP_INSTRUCTIONS_ID} className="sr-only">
-				Interactive map showing heritage sites and clusters. Use search results to navigate to a site and open
-				details.
+				{m.map.instructions}
 			</p>
 
 			<MapOverlayControls
@@ -259,7 +260,7 @@ const HeritageMap = () => {
 				zoomControl={false}
 				preferCanvas={true}
 				zoomAnimationThreshold={20}
-				aria-label="Interactive heritage map"
+				aria-label={m.map.mapAria}
 				aria-describedby={MAP_INSTRUCTIONS_ID}
 			>
 				<TileLayer

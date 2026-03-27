@@ -1,3 +1,4 @@
+import { useLanguage } from "@/lib/i18n";
 import { getSearchSubtitle } from "@/lib/heritage-api";
 import type { HeritageSiteSummary } from "@/types/heritage";
 import { Search, X } from "lucide-react";
@@ -24,6 +25,7 @@ const MapSearchBox = ({
 	recentAndChipSearches,
 	onSearchSelect,
 }: MapSearchBoxProps) => {
+	const { m } = useLanguage();
 	const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
 	const searchInputRef = useRef<HTMLInputElement | null>(null);
 	const searchItemRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -93,10 +95,10 @@ const MapSearchBox = ({
 	};
 
 	return (
-		<div className="absolute left-12 top-3 z-[10] w-80" role="search" aria-label="Heritage site search">
+		<div className="absolute left-12 top-3 z-[10] w-80" role="search" aria-label={m.map.search.wrapperAria}>
 			<div className="relative">
 				<label htmlFor={SEARCH_INPUT_ID} className="sr-only">
-					Search heritage sites
+					{m.map.search.inputLabel}
 				</label>
 				<Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
 				<input
@@ -107,9 +109,9 @@ const MapSearchBox = ({
 					value={searchQuery}
 					onChange={(event) => onSearchQueryChange(event.target.value)}
 					onKeyDown={handleSearchKeyDown}
-					placeholder="Search heritage sites..."
+					placeholder={m.map.search.placeholder}
 					role="combobox"
-					aria-label="Search heritage sites"
+					aria-label={m.map.search.inputLabel}
 					aria-autocomplete="list"
 					aria-expanded={showSearchDropdown}
 					aria-controls={showSearchDropdown ? SEARCH_RESULTS_ID : undefined}
@@ -120,7 +122,7 @@ const MapSearchBox = ({
 					<button
 						type="button"
 						onClick={() => onSearchQueryChange("")}
-						aria-label="Clear search input"
+						aria-label={m.map.search.clearAria}
 						className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
 					>
 						<X className="h-4 w-4" aria-hidden="true" />
@@ -128,13 +130,13 @@ const MapSearchBox = ({
 				)}
 			</div>
 
-			<div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Recent and quick search terms">
+			<div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={m.map.search.chipsAria}>
 				{recentAndChipSearches.map((chip) => (
 					<button
 						key={chip}
 						type="button"
 						onClick={() => handleSearchChipClick(chip)}
-						aria-label={`Use search term ${chip}`}
+						aria-label={`${m.map.search.useChipAriaPrefix} ${chip}`}
 						className="rounded-full border border-border bg-card/95 px-2.5 py-1 text-xs text-muted-foreground transition-colors [transition-duration:120ms] hover:bg-secondary hover:text-foreground"
 					>
 						{chip}
@@ -146,7 +148,7 @@ const MapSearchBox = ({
 				<div
 					id={SEARCH_RESULTS_ID}
 					role="listbox"
-					aria-label="Search results"
+					aria-label={m.map.search.resultsAria}
 					className="mt-1 max-h-72 overflow-y-auto rounded-lg border border-border bg-card/95 shadow-lg backdrop-blur-sm"
 				>
 					{searchResults.map((site, index) => (
@@ -162,7 +164,7 @@ const MapSearchBox = ({
 							}}
 							onClick={() => onSearchSelect(site)}
 							onMouseEnter={() => setActiveSearchIndex(index)}
-							aria-label={`Select ${site.name}`}
+							aria-label={`${m.map.search.selectAriaPrefix} ${site.name}`}
 							className={`flex w-full items-start gap-3 border-b border-border px-3 py-2 text-left text-sm text-foreground transition-colors [transition-duration:120ms] last:border-b-0 ${
 								activeSearchIndex === index ? "bg-secondary" : "hover:bg-secondary"
 							}`}
@@ -173,7 +175,7 @@ const MapSearchBox = ({
 									{highlightText(site.name, searchQuery)}
 								</div>
 								<div className="text-xs text-muted-foreground">
-									{highlightText(getSearchSubtitle(site) || "Heritage site", searchQuery)}
+									{highlightText(getSearchSubtitle(site) || m.map.search.fallbackSubtitle, searchQuery)}
 								</div>
 							</div>
 						</button>
@@ -187,7 +189,7 @@ const MapSearchBox = ({
 					role="status"
 					aria-live="polite"
 				>
-					Searching...
+					{m.map.search.searching}
 				</div>
 			)}
 
@@ -197,7 +199,7 @@ const MapSearchBox = ({
 					role="status"
 					aria-live="polite"
 				>
-					No sites found
+					{m.map.search.noResults}
 				</div>
 			)}
 		</div>

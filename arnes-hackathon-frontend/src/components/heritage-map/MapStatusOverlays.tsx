@@ -1,3 +1,5 @@
+import { useLanguage } from "@/lib/i18n";
+
 interface MapStatusOverlaysProps {
 	showMarkerOverlay: boolean;
 	hasMarkerError: boolean;
@@ -12,11 +14,14 @@ const MapStatusOverlays = ({
 	showMarkerOverlay,
 	hasMarkerError,
 	isRecovering = false,
-	recoveryMessage = "Retrying...",
+	recoveryMessage,
 	recoveryDetails = [],
 	onRetryNow,
 	retryDisabled = false,
 }: MapStatusOverlaysProps) => {
+	const { m } = useLanguage();
+	const effectiveRecoveryMessage = recoveryMessage || m.map.recovery.retrying;
+
 	return (
 		<>
 			{showMarkerOverlay && (
@@ -31,7 +36,7 @@ const MapStatusOverlays = ({
 					role="status"
 					aria-live="polite"
 				>
-					<div>{recoveryMessage}</div>
+					<div>{effectiveRecoveryMessage}</div>
 					{recoveryDetails.length > 0 && (
 						<div className="mt-1 text-xs text-amber-800/85">{recoveryDetails.join(" • ")}</div>
 					)}
@@ -41,7 +46,7 @@ const MapStatusOverlays = ({
 						disabled={retryDisabled}
 						className="mt-2 rounded border border-amber-600/40 px-2 py-1 text-xs text-amber-800 transition-colors [transition-duration:120ms] hover:bg-amber-100/60 disabled:cursor-not-allowed disabled:opacity-50"
 					>
-						Retry now
+						{m.map.status.retryNow}
 					</button>
 				</div>
 			)}
@@ -52,14 +57,14 @@ const MapStatusOverlays = ({
 					role="alert"
 					aria-live="assertive"
 				>
-					<div>Unable to load heritage data.</div>
+					<div>{m.map.status.unableLoadData}</div>
 					<button
 						type="button"
 						onClick={onRetryNow}
 						disabled={retryDisabled}
 						className="mt-2 rounded border border-destructive/35 px-2 py-1 text-xs text-destructive transition-colors [transition-duration:120ms] hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
 					>
-						Retry now
+						{m.map.status.retryNow}
 					</button>
 				</div>
 			)}

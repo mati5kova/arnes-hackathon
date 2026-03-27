@@ -1,3 +1,4 @@
+import { useLanguage } from "@/lib/i18n";
 import { Info, Map, Shield } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -6,6 +7,7 @@ const LAST_MAP_SEARCH_KEY = "heritage-last-map-search";
 
 const AppHeader = () => {
 	const location = useLocation();
+	const { language, setLanguage, m } = useLanguage();
 	const [lastMapSearch, setLastMapSearch] = useState<string>("");
 	const handleResetApp = () => {
 		// Full navigation resets in-memory UI state and clears map/search query params.
@@ -38,33 +40,63 @@ const AppHeader = () => {
 						<button
 							type="button"
 							onClick={handleResetApp}
-							aria-label="Reset app view and clear URL state"
+							aria-label={m.header.resetAppAria}
 							className="cursor-pointer rounded-sm text-left outline-none transition-opacity [transition-duration:120ms] hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 						>
 							Arnes<span className="text-primary">HACKATHON</span> #PROJECT-NAME-PLACEHOLDER#
 						</button>
 					</h1>
 				</div>
-				<nav className="flex items-center gap-1.5" aria-label="Primary navigation">
+				<div className="flex items-center gap-3">
+					<nav className="flex items-center gap-1.5" aria-label={m.header.navAria}>
 					<Link
 						to={mapHref}
-						aria-label="Open interactive map"
+						aria-label={m.header.openMapAria}
 						className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors [transition-duration:120ms]"
 					>
 						<Map className="h-4 w-4" aria-hidden="true" />
-						<span className={location.pathname === "/" ? "text-foreground" : undefined}>Map</span>
+							<span className={location.pathname === "/" ? "text-foreground" : undefined}>
+								{m.header.map}
+							</span>
 					</Link>
 					<Link
 						to="/capabilities"
-						aria-label="Open capabilities and roadmap page"
+						aria-label={m.header.openCapabilitiesAria}
 						className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary transition-colors [transition-duration:120ms]"
 					>
 						<Info className="h-4 w-4" aria-hidden="true" />
 						<span className={location.pathname === "/capabilities" ? "text-foreground" : undefined}>
-							Capabilities
+								{m.header.capabilities}
 						</span>
 					</Link>
-				</nav>
+					</nav>
+					<div className="flex items-center gap-1" role="group" aria-label={m.header.languageSwitchAria}>
+						<button
+							type="button"
+							onClick={() => setLanguage("sl")}
+							aria-pressed={language === "sl"}
+							className={`rounded-md px-2 py-1 text-xs font-semibold transition-colors [transition-duration:120ms] ${
+								language === "sl"
+									? "bg-primary text-primary-foreground"
+									: "bg-secondary text-muted-foreground hover:text-foreground"
+							}`}
+						>
+							SL
+						</button>
+						<button
+							type="button"
+							onClick={() => setLanguage("en")}
+							aria-pressed={language === "en"}
+							className={`rounded-md px-2 py-1 text-xs font-semibold transition-colors [transition-duration:120ms] ${
+								language === "en"
+									? "bg-primary text-primary-foreground"
+									: "bg-secondary text-muted-foreground hover:text-foreground"
+							}`}
+						>
+							EN
+						</button>
+					</div>
+				</div>
 			</header>
 		</>
 	);

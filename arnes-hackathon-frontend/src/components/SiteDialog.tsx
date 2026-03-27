@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useLanguage } from "@/lib/i18n";
 import type { HeritageSiteDetail, HeritageSiteSummary } from "@/types/heritage";
 
 interface SiteDialogProps {
@@ -9,6 +10,7 @@ interface SiteDialogProps {
 }
 
 const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogProps) => {
+	const { m } = useLanguage();
 	if (!site) return null;
 
 	const detailFields = "detailFields" in site ? site.detailFields : [];
@@ -19,7 +21,7 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 				<DialogHeader>
 					<DialogTitle>{site.name}</DialogTitle>
 					<DialogDescription className="text-muted-foreground">
-						Details for this cultural heritage site, including location and metadata from the registry.
+						{m.siteDialog.description}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -33,24 +35,24 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 						)}
 						{site.type && (
 							<div>
-								<dt className="font-medium text-foreground">Type</dt>
+								<dt className="font-medium text-foreground">{m.siteDialog.type}</dt>
 								<dd>{site.type}</dd>
 							</div>
 						)}
 						{site.municipality && (
 							<div>
-								<dt className="font-medium text-foreground">Municipality</dt>
+								<dt className="font-medium text-foreground">{m.siteDialog.municipality}</dt>
 								<dd>{site.municipality}</dd>
 							</div>
 						)}
 						{site.protectionStatus && (
 							<div>
-								<dt className="font-medium text-foreground">Protection</dt>
+								<dt className="font-medium text-foreground">{m.siteDialog.protection}</dt>
 								<dd>{site.protectionStatus}</dd>
 							</div>
 						)}
 						<div className="md:col-span-2">
-							<dt className="font-medium text-foreground">Coordinates</dt>
+							<dt className="font-medium text-foreground">{m.siteDialog.coordinates}</dt>
 							<dd>
 								{site.lat.toFixed(5)}, {site.lng.toFixed(5)}
 							</dd>
@@ -65,13 +67,13 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 							role="status"
 							aria-live="polite"
 						>
-							Loading full site details...
+							{m.siteDialog.loading}
 						</div>
 					)}
 
 					{detailFields.length > 0 && (
 						<div className="space-y-2">
-							<div className="font-medium text-foreground">Additional data</div>
+							<div className="font-medium text-foreground">{m.siteDialog.additionalData}</div>
 							<dl className="max-h-72 space-y-2 overflow-y-auto rounded-md border border-border p-3">
 								{detailFields.map((field) => (
 									<div key={`${field.label}-${field.value}`}>

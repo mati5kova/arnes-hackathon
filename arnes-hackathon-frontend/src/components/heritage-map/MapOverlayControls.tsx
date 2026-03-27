@@ -1,13 +1,9 @@
+import { useLanguage } from "@/lib/i18n";
 import type { OverlayKind, OverlayScale } from "@/types/overlays";
 import { Layers } from "lucide-react";
 import { OVERLAY_SCALE_GRADIENT } from "./overlay-style";
 
-const OVERLAY_OPTIONS: Array<{ kind: OverlayKind; label: string }> = [
-	{ kind: "fire", label: "Fire" },
-	{ kind: "flood", label: "Flood" },
-	{ kind: "air", label: "Air" },
-	{ kind: "landslide", label: "Landslide" },
-];
+const OVERLAY_OPTIONS: OverlayKind[] = ["fire", "flood", "air", "landslide"];
 
 interface MapOverlayControlsProps {
 	activeOverlay: OverlayKind | null;
@@ -32,33 +28,35 @@ const MapOverlayControls = ({
 	hasError,
 	onToggleOverlay,
 }: MapOverlayControlsProps) => {
-	const leastLabel = activeScale?.leastLabel || "Least endangered";
-	const mostLabel = activeScale?.mostLabel || "Most endangered";
+	const { m } = useLanguage();
+	const leastLabel = activeScale?.leastLabel || m.map.overlay.leastLabel;
+	const mostLabel = activeScale?.mostLabel || m.map.overlay.mostLabel;
 
 	return (
 		<div className="absolute right-4 top-3 z-[10] w-[16.5rem] rounded-lg border border-border bg-card/95 p-3 shadow-lg backdrop-blur-sm">
 			<div className="flex items-center gap-2 text-sm font-semibold text-foreground">
 				<Layers className="h-4 w-4 text-primary" aria-hidden="true" />
-				<span>Overlays</span>
+				<span>{m.map.overlay.title}</span>
 			</div>
 
-			<div className="mt-2 grid grid-cols-2 gap-1.5" role="group" aria-label="Hazard overlays">
-				{OVERLAY_OPTIONS.map((option) => {
-					const isActive = activeOverlay === option.kind;
+			<div className="mt-2 grid grid-cols-2 gap-1.5" role="group" aria-label={m.map.overlay.groupAria}>
+				{OVERLAY_OPTIONS.map((kind) => {
+					const isActive = activeOverlay === kind;
+					const optionLabel = m.map.overlay.options[kind];
 					return (
 						<button
-							key={option.kind}
+							key={kind}
 							type="button"
-							onClick={() => onToggleOverlay(option.kind)}
+							onClick={() => onToggleOverlay(kind)}
 							aria-pressed={isActive}
-							aria-label={`${option.label} overlay`}
+							aria-label={`${optionLabel} ${m.map.overlay.overlayAriaSuffix}`}
 							className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors [transition-duration:120ms] ${
 								isActive
 									? "border-primary/60 bg-primary/10 text-foreground"
 									: "border-border bg-background/80 text-muted-foreground hover:bg-secondary hover:text-foreground"
 							}`}
 						>
-							{option.label}
+							{optionLabel}
 						</button>
 					);
 				})}
@@ -66,7 +64,9 @@ const MapOverlayControls = ({
 
 			<div className="mt-3 rounded-md border border-border/70 bg-background/85 px-2 py-2">
 				<div className="mb-1 text-[11px] font-medium text-foreground" role="status" aria-live="polite">
-					{activeOverlay ? `${activeOverlayLabel || "Overlay"} scale` : "No overlay active"}
+					{activeOverlay
+						? `${activeOverlayLabel || m.map.overlay.options[activeOverlay]} ${m.map.overlay.scaleSuffix}`
+						: m.map.overlay.noneActive}
 				</div>
 				<div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
 					<span>{leastLabel}</span>
@@ -81,17 +81,17 @@ const MapOverlayControls = ({
 				/>
 			</div>
 
-			{loading && <div className="mt-2 text-xs text-muted-foreground">Loading overlay data...</div>}
+			{loading && <div className="mt-2 text-xs text-muted-foreground">{m.map.overlay.loading}</div>}
 			{activeOverlay && !loading && !hasError && renderedItemCount > 0 && (
 				<div className="mt-2 text-xs text-muted-foreground" role="status" aria-live="polite">
 					{sampleCount > renderedItemCount
-						? `${formatCompact(renderedItemCount)} ${renderedItemUnit} rendered • ${formatCompact(sampleCount)} source items in view`
-						: `${formatCompact(renderedItemCount)} ${renderedItemUnit} in view`}
+						? `${formatCompact(renderedItemCount)} ${m.map.overlay.units[renderedItemUnit]} ${m.map.overlay.viewRenderedSuffix} • ${formatCompact(sampleCount)} ${m.map.overlay.sourceItemsInView}`
+						: `${formatCompact(renderedItemCount)} ${m.map.overlay.units[renderedItemUnit]} ${m.map.overlay.inViewSuffix}`}
 				</div>
 			)}
 			{hasError && (
 				<div className="mt-2 text-xs text-destructive" role="status" aria-live="polite">
-					Overlay data is temporarily unavailable.
+					{m.map.overlay.error}
 				</div>
 			)}
 		</div>
