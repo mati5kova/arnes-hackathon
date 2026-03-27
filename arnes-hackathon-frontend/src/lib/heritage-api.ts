@@ -1,4 +1,5 @@
 import type { HeritageSiteDetail, HeritageSiteListResponse, HeritageSiteSummary } from "@/types/heritage";
+import type { OverlayGridResponse, OverlayKind } from "@/types/overlays";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -67,6 +68,29 @@ export async function fetchHeritageSite(siteId: string, signal?: AbortSignal): P
 
 export async function fetchApiHealth(signal?: AbortSignal): Promise<ApiHealthStatus> {
 	return fetchJson<ApiHealthStatus>("/api/health", signal);
+}
+
+interface OverlayOptions {
+	bbox?: string | null;
+	zoom?: number;
+	signal?: AbortSignal;
+}
+
+export async function fetchOverlayGrid(kind: OverlayKind, options: OverlayOptions = {}): Promise<OverlayGridResponse> {
+	const searchParams = new URLSearchParams();
+
+	if (options.bbox) {
+		searchParams.set("bbox", options.bbox);
+	}
+	if (typeof options.zoom === "number" && Number.isFinite(options.zoom)) {
+		searchParams.set("zoom", String(options.zoom));
+	}
+
+	const queryString = searchParams.toString();
+	return fetchJson<OverlayGridResponse>(
+		`/api/overlays/${encodeURIComponent(kind)}${queryString ? `?${queryString}` : ""}`,
+		options.signal,
+	);
 }
 
 async function fetchJson<T>(path: string, signal?: AbortSignal): Promise<T> {

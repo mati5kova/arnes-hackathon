@@ -2,6 +2,7 @@ import { ApiError, type ApiHealthStatus } from "@/lib/heritage-api";
 import { MAX_RECENT_SEARCHES, RECENT_SEARCHES_KEY } from "./constants";
 
 const MAX_RECENT_SEARCH_CHIPS = 10;
+type RecoveryMessages = (typeof import("@/lib/i18n").messages)["en"]["map"]["recovery"];
 
 export function readPersistedRecentSearches() {
 	if (typeof window === "undefined") return [];
@@ -35,48 +36,53 @@ export function mergeRecentSearchesForChips(recentSearches: string[]) {
 	return Array.from(new Set(recentSearches.map((item) => item.toLowerCase()))).slice(0, MAX_RECENT_SEARCH_CHIPS);
 }
 
-export function getMarkerRecoveryMessage(error: unknown, healthStatus?: ApiHealthStatus) {
+export function getMarkerRecoveryMessage(
+	error: unknown,
+	healthStatus?: ApiHealthStatus,
+	i18n?: RecoveryMessages,
+) {
+	const text = i18n;
 	if (healthStatus?.datasetLoading) {
 		const progress = formatProgress(healthStatus.datasetProgressPct);
 		return progress
-			? `Server waking up. Loading heritage dataset (${progress}).`
-			: "Server waking up. Loading heritage dataset...";
+			? `${text?.serverWakingWithProgress ?? "Server waking up. Loading heritage dataset"} (${progress}).`
+			: (text?.serverWaking ?? "Server waking up. Loading heritage dataset...");
 	}
 
 	if (healthStatus && !healthStatus.datasetReady) {
-		return "Server is starting and dataset is not ready yet. Retrying automatically...";
+		return text?.serverStartingRetrying ?? "Server is starting and dataset is not ready yet. Retrying automatically...";
 	}
 
 	if (error instanceof ApiError && error.status >= 500) {
-		return "Server cold start in progress. Loading heritage data and retrying...";
+		return text?.coldStartRetrying ?? "Server cold start in progress. Loading heritage data and retrying...";
 	}
 
 	if (error instanceof TypeError) {
-		return "Waiting for backend connection. Retrying automatically...";
+		return text?.waitingBackendConnection ?? "Waiting for backend connection. Retrying automatically...";
 	}
 
 	if (error instanceof Error) {
 		const message = error.message.toLowerCase();
 		if (message.includes("network") || message.includes("failed to fetch")) {
-			return "Backend not ready yet. Retrying automatically...";
+			return text?.backendNotReady ?? "Backend not ready yet. Retrying automatically...";
 		}
 	}
 
-	return "Temporary server issue. Retrying automatically...";
+	return text?.temporaryIssue ?? "Temporary server issue. Retrying automatically...";
 }
 
-export function getMarkerRecoveryDetails(healthStatus?: ApiHealthStatus) {
+export function getMarkerRecoveryDetails(healthStatus?: ApiHealthStatus, i18n?: RecoveryMessages) {
 	if (!healthStatus) return [];
 
 	const details: string[] = [];
 	const progress = formatProgress(healthStatus.datasetProgressPct);
 	if (progress) {
-		details.push(`Startup progress: ${progress}`);
+		details.push(`${i18n?.startupProgress ?? "Startup progress"}: ${progress}`);
 	}
 
 	const lastUpdate = formatHealthTimestamp(healthStatus.datasetLoadedAt || healthStatus.timestamp);
 	if (lastUpdate) {
-		details.push(`Last update: ${lastUpdate}`);
+		details.push(`${i18n?.lastUpdate ?? "Last update"}: ${lastUpdate}`);
 	}
 
 	return details;

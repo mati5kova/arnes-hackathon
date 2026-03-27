@@ -1,6 +1,7 @@
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { ApiError, fetchApiHealth, fetchHeritageSite, fetchHeritageSites } from "@/lib/heritage-api";
+import { ApiError, fetchApiHealth, fetchHeritageSite, fetchHeritageSites, fetchOverlayGrid } from "@/lib/heritage-api";
 import type { HeritageSiteSummary } from "@/types/heritage";
+import type { OverlayKind } from "@/types/overlays";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
@@ -48,6 +49,7 @@ const RETRY_POLICY = {
 interface UseHeritageMapDataOptions {
 	bbox: string | null;
 	zoom: number;
+	activeOverlay: OverlayKind | null;
 	searchQuery: string;
 	selectedSiteId: string | null;
 	selectedSitePreview: HeritageSiteSummary | null;
@@ -57,6 +59,7 @@ interface UseHeritageMapDataOptions {
 export function useHeritageMapData({
 	bbox,
 	zoom,
+	activeOverlay,
 	searchQuery,
 	selectedSiteId,
 	selectedSitePreview,
@@ -78,6 +81,18 @@ export function useHeritageMapData({
 		refetchInterval: (query) => (query.state.error ? ERROR_RECOVERY_POLL_MS : false),
 		refetchIntervalInBackground: true,
 		placeholderData: (previousData) => previousData,
+	});
+
+	const overlayQuery = useQuery({
+		queryKey: ["overlay-grid", activeOverlay, bbox, normalizedZoom],
+		queryFn: ({ signal }) => fetchOverlayGrid(activeOverlay as OverlayKind, { bbox, zoom: normalizedZoom, signal }),
+		enabled: Boolean(activeOverlay) && Boolean(bbox),
+		staleTime: 45_000,
+		gcTime: 10 * 60_000,
+		refetchOnWindowFocus: false,
+		refetchOnMount: false,
+		refetchOnReconnect: false,
+		...RETRY_POLICY,
 	});
 
 	const searchResultsQuery = useQuery({
@@ -120,10 +135,12 @@ export function useHeritageMapData({
 
 	return {
 		markersQuery,
+		overlayQuery,
 		searchResultsQuery,
 		siteDetailQuery,
 		healthQuery,
 		markerSites,
+		overlayGrid: overlayQuery.data,
 		searchResults,
 		selectedSite,
 		healthStatus: healthQuery.data,
