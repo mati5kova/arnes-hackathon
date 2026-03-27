@@ -1,59 +1,75 @@
 import geopandas as gpd
+import json
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+from openai import OpenAI
 
-gdf = gpd.read_file("kd_z_nevarnost.geojson")
+DATA_DIR = Path(__file__).parent 
+load_dotenv()
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+gdf = gpd.read_file(DATA_DIR / "kd_z_nevarnost.geojson")
 
 TOOLS = [
     {
-        "name": "top_k_endangered_in_region",
-        "description": "returns a list of the top k endangered objects in a region of a certain type of endangerment",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "isRegija": {
-                    "type": "boolean",
-                    "description" : "True to filter by regija/region, False to filter by manucipality/OBCINA"
+        "type": "function",
+        "function": {
+            "name": "top_k_endangered_in_region",
+            "description": "Returns a list of the top k endangered objects in a region of a certain type of endangerment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "isRegija": {
+                        "type": "boolean",
+                        "description": "True to filter by regija/region, False to filter by municipality/OBCINA"
                     },
-                "regija":{
-                    "type":"string",
-                    "description": "The region or manucipality to filter by, manucipalities are all uppercase, first letter of region is uppercase"
+                    "regija": {
+                        "type": "string",
+                        "description": "The region or municipality to filter by. Municipalities are ALL UPPERCASE, regions have First Letter Uppercase."
+                    },
+                    "endangerment": {
+                        "type": "string",
+                        "enum": ["poplave", "pozar", "plazovi", "potres"],
+                        "description": "The type of endangerment to rank by."
+                    },
+                    "k": {
+                        "type": "integer",
+                        "description": "How many top results to return. If omitted, returns all with the max value."
+                    }
                 },
-                "endangerment":{
-                    "type":"string",
-                    "description":"one of 'poplave', 'pozar', 'plazovi' or 'potres' based on which one you want"
-                },
-                "k":{
-                    "type":"integer",
-                    "description":"how many of the top element you get. If left empty, it returns all that have the max value"
-                }
+                "required": ["isRegija", "regija", "endangerment"],
+                "additionalProperties": False
             },
-            "required": ["isRegija", "regija", "endangerment"],
+            "strict": False
         }
     },
     {
-        "name" : "get_info_by_eid",
-        "description": "returns the information about a specific object based on its eid. You can also specify which columns you want",
-        "input_schema":{
-            "type" : "object",
-            "properties": {
-                "id":{
-                    "type":"string",
-                    "description":"the id for which you want info"
-                },
-                "columns":{
-                    "type":"array",
-                    "items":{
-                        "type":"string"
+        "type": "function",
+        "function": {
+            "name": "get_info_by_eid",
+            "description": "Returns information about a specific cultural heritage object by its EID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "eid": {
+                        "type": "string",
+                        "description": "The EID of the object."
                     },
-                    "description": """name of the columns you want to get. Choose from: 'ESD', 'EID', 'IME', 'SINONIMI', 'OPIS', 'ZVRST', 'TIP', 'GESLA',
-       'DATACIJA', 'LOKACIJAOPIS', 'OBCINA', 'ZAVOD', 'USMERITVE', 'STATUS',
-       'PREDPIS', 'PREDPISHTTP', 'VELJAVNOST',
-       'POVEZAVA1', 'SPOMENIK', 'OBCINAID', 'X', 'Y', 'PHOTOURL',
-       'poplave_ocena', 'poplave', 'pozar', 'plazovi', 'regija', 'UE_UIME',
-       'potres', 'geometry'"""
-                }
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Columns to return."
+                    }
+                },
+                "required": ["eid"],
+                "additionalProperties": False
             },
-            "required":["id"]
+            "strict": False
         }
+    },
+    {
+        "type": "web_search_preview"
     }
 ]
 
@@ -69,12 +85,103 @@ def top_k_endangered_in_region(isRegija, regija, endangerment,k=-1):
 
     return new["EID"].to_list()
 
-print(gdf[gdf["OBCINA"]=="LJUBLJANA"]["poplave"].value_counts())
 
 def get_info_by_eid(eid, columns=None):
     ret = gdf[gdf["EID"]==eid].iloc[0]
     if columns is not None:
         ret = ret[columns]
 
-    return ret
+    return ret.to_dict()
 
+def dispatch_tool(name, args):
+    if name == "top_k_endangered_in_region":
+        result = top_k_endangered_in_region(**args)
+    elif name == "get_info_by_eid":
+        result = get_info_by_eid(**args)
+    else:
+        raise ValueError(f"Unknown tool: {name}")
+    return result
+
+#------------------------------------------------------------------------
+conversation_history = []
+#openai api code 
+def run(user_message, model = "gpt-4o"):
+    conversation_history.append({"role":"user", "content":user_message})
+
+    for x in range(15):             #for loop just for loop safety. In general its while True:
+        response = client.responses.create(
+            model=model,
+            tools=TOOLS,
+            input=conversation_history
+        )
+
+        conversation_history.append({"role":"assistant", "content":response.output})
+
+        tool_calls = [item for item in response.output if item.type == "function_call"]
+
+        if not tool_calls:
+            for item in response.output:
+                if item.type == "message":
+                    for block in item.content:
+                        if block.type == "output_text":
+                            return block.text
+            
+            return ""
+
+        for call in tool_calls:
+            args = json.loads(call.arguments)
+            print(f"[tool] {call.name} ({args})")
+
+            try: 
+                result = dispatch_tool(call.name, args)
+                output = json.dumps(result, ensure_ascii=False, default=str)
+            except Exception as e:
+                output = json.dumps({"error": str(e)})
+
+            conversation_history.append({
+                "type": "function_call_output",
+                "call_id": call.call_id,
+                "output": output
+            })
+
+#gemini api code
+"""
+def run(user_message: str, model: str = "gemini-2.0-flash"):
+    conversation_history.append({"role": "user", "content": user_message})
+
+    while True:
+        response = client.chat.completions.create(
+            model=model,
+            tools=TOOLS,
+            messages=conversation_history,
+        )
+
+        message = response.choices[0].message
+        conversation_history.append(message)
+
+        if not message.tool_calls:
+            return message.content
+
+        for call in message.tool_calls:
+            args = json.loads(call.function.arguments)
+            print(f"[tool] {call.function.name}({args})")
+            try:
+                result = dispatch_tool(call.function.name, args)
+                output = json.dumps(result, ensure_ascii=False, default=str)
+            except Exception as e:
+                output = json.dumps({"error": str(e)})
+
+            conversation_history.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": output,
+            })
+
+"""
+#-----------------------------------------------------
+if __name__ == "__main__":
+    answer = run(
+        """Kateri spomeniki v komendi so najbolj ogroženi zaradi poplav.
+        Poišči po internetu za nedavne poplave v tem okolju in pripni vire"""
+    )
+    print(answer)
