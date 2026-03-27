@@ -13,10 +13,28 @@ interface MockQueryState {
 
 interface MockDataState {
 	markersQuery: MockQueryState;
+	overlayQuery: MockQueryState;
 	searchResultsQuery: { isFetching: boolean };
 	siteDetailQuery: { isLoading: boolean };
 	healthQuery: MockQueryState;
 	markerSites: HeritageSiteSummary[];
+	overlayGrid:
+		| {
+				label: string;
+				scale: {
+					leastLabel: string;
+					mostLabel: string;
+				};
+				cells: Array<{
+					id: string;
+					normalized: number;
+					score: number;
+					level: number;
+					sampleCount: number;
+					bounds: [number, number, number, number];
+				}>;
+		  }
+		| undefined;
 	searchResults: HeritageSiteSummary[];
 	selectedSite: HeritageSiteSummary | null;
 	healthStatus:
@@ -46,9 +64,12 @@ const mockFns = vi.hoisted((): { useDataImpl: MockUseDataImpl } => ({
 vi.mock("react-leaflet", () => ({
 	MapContainer: ({ children }: { children: ReactNode }) => <div data-testid="map-container">{children}</div>,
 	TileLayer: () => null,
+	AttributionControl: () => null,
 	ZoomControl: () => null,
 	Pane: ({ children }: { children: ReactNode }) => <>{children}</>,
 	CircleMarker: () => null,
+	Rectangle: () => null,
+	GeoJSON: () => null,
 }));
 
 vi.mock("./heritage-map/map-behavior", () => ({
@@ -74,10 +95,12 @@ describe("HeritageMap core behavior", () => {
 	beforeEach(() => {
 		mockFns.useDataImpl = () => ({
 			markersQuery: { error: null, isFetching: false, failureCount: 0, refetch: vi.fn() },
+			overlayQuery: { error: null, isFetching: false, failureCount: 0, refetch: vi.fn() },
 			searchResultsQuery: { isFetching: false },
 			siteDetailQuery: { isLoading: false },
 			healthQuery: { error: null, isFetching: false, refetch: vi.fn() },
 			markerSites: [],
+			overlayGrid: undefined,
 			searchResults: [],
 			selectedSite: null,
 			healthStatus: undefined,
@@ -107,10 +130,12 @@ describe("HeritageMap core behavior", () => {
 			const shouldShow = typedOptions.searchQuery.trim().length > 1;
 			return {
 				markersQuery: { error: null, isFetching: false, failureCount: 0, refetch: vi.fn() },
+				overlayQuery: { error: null, isFetching: false, failureCount: 0, refetch: vi.fn() },
 				searchResultsQuery: { isFetching: false },
 				siteDetailQuery: { isLoading: false },
 				healthQuery: { error: null, isFetching: false, refetch: vi.fn() },
 				markerSites: [],
+				overlayGrid: undefined,
 				searchResults: shouldShow ? [site] : [],
 				selectedSite: typedOptions.selectedSitePreview,
 				healthStatus: undefined,
@@ -156,10 +181,12 @@ describe("HeritageMap core behavior", () => {
 				failureCount: 2,
 				refetch: refetchMarkers,
 			},
+			overlayQuery: { error: null, isFetching: false, failureCount: 0, refetch: vi.fn() },
 			searchResultsQuery: { isFetching: false },
 			siteDetailQuery: { isLoading: false },
 			healthQuery: { error: null, isFetching: false, refetch: refetchHealth },
 			markerSites: [],
+			overlayGrid: undefined,
 			searchResults: [],
 			selectedSite: null,
 			healthStatus: {
@@ -196,5 +223,53 @@ describe("HeritageMap core behavior", () => {
 		fireEvent.click(screen.getByRole("button", { name: /retry now/i }));
 		expect(refetchMarkers).toHaveBeenCalledTimes(1);
 		expect(refetchHealth).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps only one overlay toggle active at a time", () => {
+		render(
+			<MemoryRouter
+				initialEntries={["/"]}
+				future={{
+					v7_startTransition: true,
+					v7_relativeSplatPath: true,
+				}}
+			>
+				<HeritageMap />
+			</MemoryRouter>,
+		);
+
+		const fireToggle = screen.getByRole("button", { name: /fire overlay/i });
+		const floodToggle = screen.getByRole("button", { name: /flood overlay/i });
+
+		expect(fireToggle).toHaveAttribute("aria-pressed", "false");
+		expect(floodToggle).toHaveAttribute("aria-pressed", "false");
+
+		fireEvent.click(fireToggle);
+		expect(fireToggle).toHaveAttribute("aria-pressed", "true");
+		expect(floodToggle).toHaveAttribute("aria-pressed", "false");
+
+		fireEvent.click(floodToggle);
+		expect(fireToggle).toHaveAttribute("aria-pressed", "false");
+		expect(floodToggle).toHaveAttribute("aria-pressed", "true");
+
+		fireEvent.click(floodToggle);
+		expect(floodToggle).toHaveAttribute("aria-pressed", "false");
+	});
+
+	it("hydrates active overlay from URL state", () => {
+		render(
+			<MemoryRouter
+				initialEntries={["/?overlay=air"]}
+				future={{
+					v7_startTransition: true,
+					v7_relativeSplatPath: true,
+				}}
+			>
+				<HeritageMap />
+			</MemoryRouter>,
+		);
+
+		expect(screen.getByRole("button", { name: /air overlay/i })).toHaveAttribute("aria-pressed", "true");
+		expect(screen.getByRole("button", { name: /fire overlay/i })).toHaveAttribute("aria-pressed", "false");
 	});
 });

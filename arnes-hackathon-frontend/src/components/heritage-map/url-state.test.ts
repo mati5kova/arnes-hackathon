@@ -27,4 +27,16 @@ describe("url-state reload behavior", () => {
 		const module = await import("./url-state");
 		expect(module.shouldIgnoreMapUrlStateOnMount()).toBe(false);
 	});
+
+	it("parses valid overlay from URL state", async () => {
+		const module = await import("./url-state");
+		const parsed = module.parseMapUrlState(new URLSearchParams("overlay=flood"));
+		expect(parsed.overlay).toBe("flood");
+	});
+
+	it("ignores invalid overlay in URL state", async () => {
+		const module = await import("./url-state");
+		const parsed = module.parseMapUrlState(new URLSearchParams("overlay=unknown"));
+		expect(parsed.overlay).toBeNull();
+	});
 });

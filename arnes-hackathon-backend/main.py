@@ -2,14 +2,18 @@ import os
 from hashlib import sha1
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from threading import Thread
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
+from fastapi.concurrency import run_in_threadpool
 from fastapi import FastAPI, HTTPException, Path, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from observability import get_metrics_snapshot, log_event, record_request, record_search_latency
+from overlays import list_overlay_catalog, list_overlay_grid
+from overlays.service import get_overlay_dataset
 from rnpd_service import (
     get_dataset,
     get_dataset_status,
@@ -27,6 +31,7 @@ CACHE_CONTROL_HEALTH = os.getenv("API_CACHE_CONTROL_HEALTH", "no-store")
 CACHE_CONTROL_METRICS = os.getenv("API_CACHE_CONTROL_METRICS", "no-store")
 CACHE_CONTROL_SITES = os.getenv("API_CACHE_CONTROL_SITES", "public, max-age=60")
 CACHE_CONTROL_SITE_DETAIL = os.getenv("API_CACHE_CONTROL_SITE_DETAIL", "public, max-age=300")
+CACHE_CONTROL_OVERLAYS = os.getenv("API_CACHE_CONTROL_OVERLAYS", "public, max-age=30")
 if UNBOUNDED_LIST_LIMIT < 1:
     UNBOUNDED_LIST_LIMIT = 2500
 
@@ -150,13 +155,91 @@ class ErrorResponse(BaseModel):
     detail: str = Field(description="Human-readable error detail.", examples=["Site not found"])
 
 
+class OverlayCatalogItem(BaseModel):
+    kind: str = Field(description="Overlay key identifier.", examples=["fire", "flood", "air", "landslide"])
+    label: str = Field(description="Display label for overlay toggle.", examples=["Fire danger"])
+    description: str = Field(
+        description="Short human-readable explanation of the overlay data source.",
+        examples=["Fire danger polygons from the official hazard map."],
+    )
+
+
+class OverlayCatalogResponse(BaseModel):
+    items: List[OverlayCatalogItem] = Field(description="Available overlay options.")
+
+
+class OverlayScaleStep(BaseModel):
+    level: int = Field(description="Discrete display level from 1 (least) to 4 (most).", examples=[1, 4])
+    label: str = Field(description="Label for this level.", examples=["Low", "Extreme"])
+    normalized: float = Field(description="Normalized position in [0,1].", examples=[0.0, 1.0])
+
+
+class OverlayScale(BaseModel):
+    direction: str = Field(description="Scale direction for UI rendering.", examples=["low-to-high"])
+    leastLabel: str = Field(description="Label shown at low end of scale.", examples=["Least endangered"])
+    mostLabel: str = Field(description="Label shown at high end of scale.", examples=["Most endangered"])
+    steps: List[OverlayScaleStep] = Field(description="Scale stops used by UI.")
+
+
+class OverlayCell(BaseModel):
+    id: str = Field(description="Stable grid cell identifier for current viewport.", examples=["cell:14:27"])
+    score: float = Field(description="Aggregated raw score for this cell.", examples=[2.74])
+    normalized: float = Field(description="Score normalized to [0,1] for consistent coloring.", examples=[0.58])
+    level: int = Field(description="Discrete danger level from 1..4.", examples=[3])
+    sampleCount: int = Field(description="Number of source samples merged into this cell.", examples=[23])
+    bounds: List[float] = Field(
+        description="Cell bounds in format [minLng,minLat,maxLng,maxLat].",
+        min_length=4,
+        max_length=4,
+        examples=[[14.1225, 46.0125, 14.1450, 46.0350]],
+    )
+
+
+class OverlayArea(BaseModel):
+    id: str = Field(description="Stable area identifier.", examples=["fire:1028:0"])
+    score: float = Field(description="Raw hazard score for this area.", examples=[3.0])
+    normalized: float = Field(description="Score normalized to [0,1] for consistent coloring.", examples=[0.66])
+    level: int = Field(description="Discrete danger level from 1..4.", examples=[3])
+    bounds: List[float] = Field(
+        description="Area bounds in format [minLng,minLat,maxLng,maxLat].",
+        min_length=4,
+        max_length=4,
+        examples=[[14.1225, 46.0125, 14.1450, 46.0350]],
+    )
+    ring: List[List[float]] = Field(
+        description="Polygon outer ring in [lng,lat] coordinate pairs.",
+        examples=[[[14.12, 46.01], [14.14, 46.01], [14.14, 46.03], [14.12, 46.03], [14.12, 46.01]]],
+    )
+
+
+class OverlayGridResponse(BaseModel):
+    kind: str = Field(description="Overlay key identifier.", examples=["fire"])
+    label: str = Field(description="Display label for active overlay.", examples=["Fire danger"])
+    description: str = Field(description="Overlay description.")
+    scale: OverlayScale = Field(description="Legend/scale metadata.")
+    areas: List[OverlayArea] = Field(description="Viewport-optimized hazard polygons for area overlays.")
+    cells: List[OverlayCell] = Field(description="Viewport-optimized grid cells for point-based overlays.")
+    sampleCount: int = Field(description="Number of rendered source items represented in current viewport.", examples=[1420])
+    totalAvailableSamples: int = Field(description="Total source items available for this overlay.", examples=[31086])
+    gridCellSizeDeg: float = Field(description="Final aggregation cell size in degrees (0 for area overlays).", examples=[0.0214, 0.0])
+    generatedAt: float = Field(description="UTC timestamp (ms since epoch) of overlay cache load.", examples=[1762230400123.0])
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    def warm_overlay_dataset() -> None:
+        try:
+            get_overlay_dataset(refresh=False)
+        except Exception as exc:
+            # Keep API process alive; first overlay request will report any load issue.
+            print(f"[startup] overlay warmup failed: {exc}")
+
     try:
         get_dataset(refresh=False)
     except Exception as exc:
         # Keep API process alive; request handlers will still surface loading errors.
         print(f"[startup] dataset warmup failed: {exc}")
+    Thread(target=warm_overlay_dataset, daemon=True).start()
     yield
 
 
@@ -305,6 +388,82 @@ async def metrics(response: Response) -> Dict[str, Any]:
 
 
 @app.get(
+    "/api/overlays",
+    tags=["Overlays"],
+    summary="List Available Overlays",
+    description="Returns available map overlays and their display metadata.",
+    response_model=OverlayCatalogResponse,
+)
+async def overlays_catalog(response: Response) -> Dict[str, Any]:
+    response.headers["cache-control"] = CACHE_CONTROL_OVERLAYS
+    return {"items": list_overlay_catalog()}
+
+
+@app.get(
+    "/api/overlays/{overlay_kind}",
+    tags=["Overlays"],
+    summary="Get Overlay Data for Current Viewport",
+    description=(
+        "Returns overlay data for the current map viewport.\n\n"
+        "This endpoint is optimized for map rendering performance:\n"
+        "- Area overlays return hazard polygons clipped and simplified for current zoom\n"
+        "- Point overlays return aggregated grid cells (for station-based datasets)\n"
+        "- Density is bounded server-side to prevent frontend overload\n"
+        "- Scores are normalized to a shared low-to-high scale (least to most endangered)\n"
+    ),
+    response_model=OverlayGridResponse,
+    responses={
+        404: {"model": ErrorResponse, "description": "Unknown overlay key."},
+        503: {"model": ErrorResponse, "description": "Overlay data unavailable."},
+    },
+)
+async def overlay_grid(
+    response: Response,
+    overlay_kind: str = Path(
+        description="Overlay key (`fire`, `flood`, `air`, `landslide`).",
+        examples=["fire"],
+    ),
+    bbox: Optional[str] = Query(
+        default=None,
+        description="Viewport bounding box in format: `minLng,minLat,maxLng,maxLat`.",
+        examples={"slovenia": {"summary": "Approximate Slovenia viewport", "value": "13.30,45.30,16.70,46.90"}},
+    ),
+    zoom: Optional[float] = Query(
+        default=None,
+        ge=0,
+        le=22,
+        description="Client map zoom used to decide aggregation cell size.",
+        examples={"overview": {"summary": "Overview map", "value": 8}, "street": {"summary": "Street-level map", "value": 15}},
+    ),
+    refresh: Optional[str] = Query(
+        default=None,
+        description="Set to `1`, `true`, `yes`, or `y` to reload overlay source data.",
+        examples={"force_reload": {"summary": "Bypass cache", "value": "1"}},
+    ),
+) -> Dict[str, Any]:
+    try:
+        parsed_bbox = read_bbox(bbox, strict=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        payload = await run_in_threadpool(
+            list_overlay_grid,
+            kind=overlay_kind,
+            bbox=parsed_bbox,
+            zoom=zoom,
+            refresh=read_refresh_flag(refresh),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=f"Overlay dataset unavailable: {exc}") from exc
+
+    response.headers["cache-control"] = CACHE_CONTROL_OVERLAYS
+    return payload
+
+
+@app.get(
     "/api/heritage-sites",
     tags=["Heritage Sites"],
     summary="List Heritage Sites / Marker Points",
@@ -449,7 +608,8 @@ async def heritage_sites(
         )
 
     try:
-        payload = list_heritage_sites(
+        payload = await run_in_threadpool(
+            list_heritage_sites,
             search=search,
             limit=effective_limit,
             bbox=parsed_bbox,

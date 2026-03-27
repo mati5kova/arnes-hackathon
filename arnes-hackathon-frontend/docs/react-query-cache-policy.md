@@ -7,6 +7,7 @@ This document defines the cache policy for map-related API queries.
 | Query key | Endpoint | staleTime | gcTime | refetchOnWindowFocus | refetchOnMount | refetchOnReconnect | Reasoning |
 | --- | --- | ---: | ---: | --- | --- | --- | --- |
 | `["heritage-sites", "markers", bbox, zoom]` | `GET /api/heritage-sites?bbox=...&zoom=...` | `Infinity` | `10m` | `false` | `false` | `false` | Source data is static enough to avoid automatic network refreshes for revisits. |
+| `["overlay-grid", kind, bbox, zoom]` | `GET /api/overlays/{kind}?bbox=...&zoom=...` | `45s` | `10m` | `false` | `false` | `false` | Overlay cells are viewport/zoom-derived and should stay fresh for short map navigation windows while avoiding noisy refetches. |
 | `["heritage-sites", "search", search]` | `GET /api/heritage-sites?search=...&limit=20` | `Infinity` | `5m` | `false` | `false` | `false` | Search responses are deterministic for the current dataset snapshot. |
 | `["heritage-site", siteId]` | `GET /api/heritage-sites/{siteId}` | `Infinity` | `30m` | `false` | `false` | `false` | Detail metadata is static and benefits from aggressive client reuse. |
 | `["api-health"]` | `GET /api/health` | `0` | `1m` | n/a (interval-driven) | n/a (interval-driven) | n/a (interval-driven) | Startup/readiness probe. Polled every `2s` while dataset is loading/not-ready, or while marker query is still fetching/error. Stops once backend is ready and markers are healthy. |

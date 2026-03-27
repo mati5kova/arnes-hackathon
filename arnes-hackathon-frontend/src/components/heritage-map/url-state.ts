@@ -1,3 +1,5 @@
+import type { OverlayKind } from "@/types/overlays";
+
 const DEFAULT_ZOOM = 8;
 const MIN_ZOOM = 3;
 const MAX_ZOOM = 18;
@@ -10,6 +12,7 @@ export interface ParsedMapUrlState {
 	bbox: string | null;
 	zoom: number;
 	search: string;
+	overlay: OverlayKind | null;
 }
 
 export function parseMapUrlState(searchParams: URLSearchParams): ParsedMapUrlState {
@@ -17,6 +20,7 @@ export function parseMapUrlState(searchParams: URLSearchParams): ParsedMapUrlSta
 		bbox: normalizeBbox(searchParams.get("bbox")),
 		zoom: parseZoom(searchParams.get("zoom")),
 		search: (searchParams.get("search") || "").trim(),
+		overlay: parseOverlayKind(searchParams.get("overlay")),
 	};
 }
 
@@ -58,6 +62,15 @@ function normalizeBbox(rawBbox: string | null): string | null {
 	const [minLng, minLat, maxLng, maxLat] = numbers;
 	if (minLng >= maxLng || minLat >= maxLat) return null;
 	return numbers.map((value) => value.toFixed(4)).join(",");
+}
+
+function parseOverlayKind(rawOverlay: string | null): OverlayKind | null {
+	if (!rawOverlay) return null;
+	const normalized = rawOverlay.trim().toLowerCase();
+	if (normalized === "fire" || normalized === "flood" || normalized === "air" || normalized === "landslide") {
+		return normalized;
+	}
+	return null;
 }
 
 function clamp(value: number, min: number, max: number) {
