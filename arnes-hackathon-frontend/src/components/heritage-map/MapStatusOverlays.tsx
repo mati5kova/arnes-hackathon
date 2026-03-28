@@ -32,7 +32,7 @@ const MapStatusOverlays = ({
 
 			{isRecovering && (
 				<div
-					className="absolute right-4 top-36 z-[10] max-w-sm rounded-md border border-amber-500/35 bg-card/95 px-3 py-2 text-sm text-amber-700 shadow-md backdrop-blur-sm"
+					className="absolute left-1/2 top-36 z-[10] w-[min(92vw,26rem)] -translate-x-1/2 rounded-md border border-amber-500/35 bg-card/95 px-3 py-2 text-sm text-amber-700 shadow-md backdrop-blur-sm sm:left-auto sm:right-4 sm:top-[15.5rem] sm:w-[16.5rem] sm:translate-x-0"
 					role="status"
 					aria-live="polite"
 				>
@@ -53,7 +53,7 @@ const MapStatusOverlays = ({
 
 			{hasMarkerError && (
 				<div
-					className="absolute right-4 top-36 z-[10] max-w-sm rounded-md border border-destructive/30 bg-card/95 px-3 py-2 text-sm text-destructive shadow-md backdrop-blur-sm"
+					className="absolute left-1/2 top-36 z-[10] w-[min(92vw,26rem)] -translate-x-1/2 rounded-md border border-destructive/30 bg-card/95 px-3 py-2 text-sm text-destructive shadow-md backdrop-blur-sm sm:left-auto sm:right-4 sm:top-[15.5rem] sm:w-[16.5rem] sm:translate-x-0"
 					role="alert"
 					aria-live="assertive"
 				>
