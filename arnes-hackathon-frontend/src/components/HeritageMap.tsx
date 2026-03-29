@@ -1,11 +1,15 @@
+import { useLanguage } from "@/lib/i18n";
 import type { HeritageSiteSummary } from "@/types/heritage";
+import type { OverlayKind } from "@/types/overlays";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttributionControl, MapContainer, TileLayer, ZoomControl } from "react-leaflet";
 import { useSearchParams } from "react-router-dom";
 import MapLegend from "./heritage-map/MapLegend";
+import MapOverlayControls from "./heritage-map/MapOverlayControls";
 import MapSearchBox from "./heritage-map/MapSearchBox";
 import MapStatusOverlays from "./heritage-map/MapStatusOverlays";
 import MarkerLayer from "./heritage-map/MarkerLayer";
+import OverlayLayer from "./heritage-map/OverlayLayer";
 import {
 	CLUSTER_FLY_HOLD_MS,
 	FLY_TO_DIALOG_DELAY_MS,
@@ -31,6 +35,7 @@ import { useHeritageMapData } from "./heritage-map/use-heritage-map-data";
 const SiteDialog = lazy(() => import("./SiteDialog"));
 
 const HeritageMap = () => {
+	const { m } = useLanguage();
 	const [searchParams, setSearchParams] = useSearchParams();
 	const ignoreMapUrlStateRef = useRef(shouldIgnoreMapUrlStateOnMount());
 	const initialUrlStateRef = useRef(
@@ -46,13 +51,16 @@ const HeritageMap = () => {
 	const [flyZoom, setFlyZoom] = useState<number | undefined>(undefined);
 	const [bbox, setBbox] = useState<string | null>(initialUrlState.bbox);
 	const [zoom, setZoom] = useState<number>(initialUrlState.zoom);
+	const [activeOverlay, setActiveOverlay] = useState<OverlayKind | null>(initialUrlState.overlay);
 
 	const {
 		markersQuery,
+		overlayQuery,
 		searchResultsQuery,
 		siteDetailQuery,
 		healthQuery,
 		markerSites,
+		overlayGrid,
 		searchResults,
 		selectedSite,
 		healthStatus,
@@ -63,6 +71,7 @@ const HeritageMap = () => {
 	} = useHeritageMapData({
 		bbox,
 		zoom,
+		activeOverlay,
 		searchQuery,
 		selectedSiteId,
 		selectedSitePreview,
@@ -87,6 +96,7 @@ const HeritageMap = () => {
 				nextParams.delete("bbox");
 				nextParams.delete("zoom");
 				nextParams.delete("search");
+				nextParams.delete("overlay");
 				return nextParams.toString() === currentParams.toString() ? currentParams : nextParams;
 			},
 			{ replace: true },
@@ -117,11 +127,17 @@ const HeritageMap = () => {
 					nextParams.delete("search");
 				}
 
+				if (activeOverlay) {
+					nextParams.set("overlay", activeOverlay);
+				} else {
+					nextParams.delete("overlay");
+				}
+
 				return nextParams.toString() === currentParams.toString() ? currentParams : nextParams;
 			},
 			{ replace: true },
 		);
-	}, [bbox, searchQuery, setSearchParams, zoom]);
+	}, [activeOverlay, bbox, searchQuery, setSearchParams, zoom]);
 
 	const handleMarkerClick = useCallback(
 		(site: HeritageSiteSummary) => {
@@ -176,6 +192,10 @@ const HeritageMap = () => {
 		}, FLY_TO_DIALOG_DELAY_MS + 550);
 	};
 
+	const handleOverlayToggle = useCallback((overlayKind: OverlayKind) => {
+		setActiveOverlay((current) => (current === overlayKind ? null : overlayKind));
+	}, []);
+
 	const markerError = markersQuery.error;
 	const healthError = healthQuery.error;
 	const datasetLoading = Boolean(healthStatus?.datasetLoading);
@@ -188,9 +208,16 @@ const HeritageMap = () => {
 	// Keep recovery banner visible during retry-delay gaps to avoid a brief hard-error flash before success.
 	const isRetryingBackendStartup = noMarkerDataLoaded && (hasTransientMarkerFailures || Boolean(healthError));
 	const showRecoveryBanner = isRecoveringFromError || isWaitingForDataset || isRetryingBackendStartup;
-	const markerRecoveryMessage = getMarkerRecoveryMessage(markerError ?? healthError, healthStatus);
-	const markerRecoveryDetails = getMarkerRecoveryDetails(healthStatus);
+	const markerRecoveryMessage = getMarkerRecoveryMessage(markerError ?? healthError, healthStatus, m.map.recovery);
+	const markerRecoveryDetails = getMarkerRecoveryDetails(healthStatus, m.map.recovery);
 	const isRetryNowDisabled = markersQuery.isFetching && healthQuery.isFetching;
+	const overlayAreas = overlayGrid?.areas ?? [];
+	const overlayCells = overlayGrid?.cells ?? [];
+	const overlayLoading = Boolean(activeOverlay) && overlayQuery.isFetching;
+	const overlayHasError = Boolean(activeOverlay) && Boolean(overlayQuery.error);
+	const renderedOverlayCount = overlayAreas.length > 0 ? overlayAreas.length : overlayCells.length;
+	const renderedOverlayUnit = overlayAreas.length > 0 ? "areas" : "cells";
+	const overlayLayerKey = `${activeOverlay ?? "none"}:${overlayGrid?.generatedAt ?? 0}:${overlayAreas.length}:${overlayCells.length}:${overlayGrid?.sampleCount ?? 0}`;
 
 	const handleRetryNow = () => {
 		void healthQuery.refetch();
@@ -198,7 +225,7 @@ const HeritageMap = () => {
 	};
 
 	return (
-		<div className="relative h-full flex-1" role="region" aria-label="Heritage map and search">
+		<div className="relative h-full flex-1" role="region" aria-label={m.map.containerAria}>
 			<MapSearchBox
 				searchQuery={searchQuery}
 				onSearchQueryChange={setSearchQuery}
@@ -210,9 +237,20 @@ const HeritageMap = () => {
 			/>
 
 			<p id={MAP_INSTRUCTIONS_ID} className="sr-only">
-				Interactive map showing heritage sites and clusters. Use search results to navigate to a site and open
-				details.
+				{m.map.instructions}
 			</p>
+
+			<MapOverlayControls
+				activeOverlay={activeOverlay}
+				activeOverlayLabel={overlayGrid?.label}
+				activeScale={overlayGrid?.scale}
+				renderedItemCount={renderedOverlayCount}
+				renderedItemUnit={renderedOverlayUnit}
+				sampleCount={overlayGrid?.sampleCount ?? 0}
+				loading={overlayLoading}
+				hasError={overlayHasError}
+				onToggleOverlay={handleOverlayToggle}
+			/>
 
 			<MapContainer
 				center={[46.15, 14.99]}
@@ -222,7 +260,7 @@ const HeritageMap = () => {
 				zoomControl={false}
 				preferCanvas={true}
 				zoomAnimationThreshold={20}
-				aria-label="Interactive heritage map"
+				aria-label={m.map.mapAria}
 				aria-describedby={MAP_INSTRUCTIONS_ID}
 			>
 				<TileLayer
@@ -239,6 +277,7 @@ const HeritageMap = () => {
 						setZoom(nextZoom);
 					}}
 				/>
+				<OverlayLayer layerKey={overlayLayerKey} areas={overlayAreas} cells={overlayCells} />
 				<MarkerLayer markerSites={markerSites} onMarkerClick={handleMarkerClick} />
 				<FlyToSite
 					site={flyTarget}

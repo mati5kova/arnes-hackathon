@@ -1,4 +1,5 @@
 import AppHeader from "@/components/AppHeader";
+import { useLanguage } from "@/lib/i18n";
 import { GripVertical } from "lucide-react";
 import { Suspense, lazy, useEffect } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
@@ -9,6 +10,8 @@ const HeritageMap = lazy(() => import("@/components/HeritageMap"));
 const ChatSidebar = lazy(() => import("@/components/ChatSidebar"));
 
 const Index = () => {
+	const { m } = useLanguage();
+
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 		// Always start with chat panel open on app load.
@@ -21,14 +24,14 @@ const Index = () => {
 				href="#heritage-main-content"
 				className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"
 			>
-				Skip to main content
+				{m.index.skipToMain}
 			</a>
 			<AppHeader />
 
 			<main
 				id="heritage-main-content"
 				className="flex-1 overflow-hidden"
-				aria-label="Heritage map and assistant workspace"
+				aria-label={m.index.mainAria}
 			>
 				<PanelGroup direction="horizontal" className="h-full w-full" autoSaveId={PANEL_LAYOUT_AUTO_SAVE_ID}>
 					<Panel defaultSize={75} minSize={50}>
@@ -39,7 +42,7 @@ const Index = () => {
 
 					<PanelResizeHandle
 						className="group relative w-2 bg-border/50 transition-colors hover:bg-border focus:outline-none"
-						aria-label="Resize map and assistant panels"
+						aria-label={m.index.resizeAria}
 					>
 						<div className="absolute inset-y-0 left-1/2 -translate-x-1/2 flex items-center">
 							<div className="flex h-16 w-5 items-center justify-center rounded-md border border-border/70 bg-background/90 shadow-sm transition-colors group-hover:border-muted-foreground/40">

@@ -96,6 +96,7 @@ Do not open `dist/index.html` directly with `file://`; serve it through an HTTP 
 ## Notes
 
 - Backend data is local-first and uses `arnes-hackathon-backend/rnpd.json` by default.
+- Overlay data is exposed through `GET /api/overlays` and `GET /api/overlays/{kind}` (`fire`, `flood`, `air`, `landslide`), with viewport/zoom aggregation for map performance.
 - Backend dev dependencies are listed in `arnes-hackathon-backend/requirements-dev.txt`.
 - More detailed run notes are in `arnes-hackathon-frontend/RUN.md` and `arnes-hackathon-backend/backedn.md`.
 

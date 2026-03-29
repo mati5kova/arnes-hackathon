@@ -12,6 +12,8 @@ By default it runs fully from local files (no dependency on OPSI/network).
 - `GET /api/heritage-sites?search=ljubljana&limit=20`
 - `GET /api/heritage-sites?bbox=minLng,minLat,maxLng,maxLat&zoom=8` (clustered map points)
 - `GET /api/heritage-sites/{site_id}`
+- `GET /api/overlays` (available overlay catalog)
+- `GET /api/overlays/{kind}?bbox=...&zoom=...` (`kind` = `fire|flood|air|landslide`, backend-aggregated for rendering performance)
 
 ### FastAPI Docs
 
@@ -74,3 +76,4 @@ To speed up cold starts, normalized sites are persisted to a preprocessed cache 
     - `API_CACHE_CONTROL_METRICS`
     - `API_CACHE_CONTROL_SITES`
     - `API_CACHE_CONTROL_SITE_DETAIL`
+    - `API_CACHE_CONTROL_OVERLAYS`

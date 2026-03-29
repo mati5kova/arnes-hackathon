@@ -9,7 +9,7 @@
                 font-size: 11pt;
                 line-height: 1.42;
                 color: #222;
-                margin: 2.2cm;
+                margin: 2cm;
                 max-width: 24cm;
             }
 
@@ -20,13 +20,21 @@
             }
 
             h1 {
-                font-size: 18pt;
+                font-size: 16pt;
                 margin-top: 0;
             }
 
             h2 {
-                font-size: 13pt;
+                font-size: 12pt;
                 margin-top: 1.2em;
+            }
+
+            .naslov > h1 {
+                margin-bottom: 0.1em;
+            }
+
+            .naslov > h2 {
+                margin: 0 0 0.5em 0;
             }
 
             p {
@@ -55,21 +63,40 @@
                 color: inherit;
                 text-decoration: none;
             }
+
+            sup.ref {
+                font-size: 0.75em;
+                vertical-align: super;
+                line-height: 0;
+            }
+
+            .sources {
+                margin-top: 2em;
+                font-size: 10pt;
+            }
+
+            .sources ol {
+                margin: 0.5em 0 0 1.2em;
+                padding: 0;
+            }
+
+            .sources li {
+                margin: 0.35em 0;
+                text-align: left;
+            }
         </style>
     </head>
     <body>
-        <h1>Pisni izdelek za 1. krog Arnesovega HackathON-a 2026</h1>
+        <div class="naslov">
+            <h1>Kulturko - UI za klasifikacijo ogroženosti kulturne dediščine</h1>
+            <h2>Pisni izdelek za 1. krog Arnesovega HackathON-a 2026</h2>
+        </div>
 
         <div class="meta">
-            <p><strong>Ime ekipe:</strong> 2prompt2fail</p>
+            <p><strong>Ime ekipe:</strong>&nbsp;2prompt2fail</p>
             <p><strong>Člani ekipe:</strong>&nbsp;Matevž Kovačič, Primož Plevel, David Šiška</p>
-            <p><strong>Naslov rešitve:</strong>&nbsp;Klasifikator ogroženosti kulturne dediščine v Sloveniji</p>
-            <p>
-                <strong>Izbrani izziv:</strong>&nbsp;UI za digitalno družbo -
-                <a href="https://hackathon.si/ui-za-digitalno-druzbo/" target="_blank" class="alter-link-look">
-                    ohranjanje kulturne dediščine
-                </a>
-            </p>
+            <p><strong>Izbrani izziv:</strong>&nbsp;UI za digitalno družbo - ohranjanje kulturne dediščine</p>
+            <p><strong>Naslov rešitve:</strong>&nbsp;Kulturko - UI za klasifikacijo ogroženosti kulturne dediščine</p>
         </div>
 
         <h2>Opis izziva, problematike in cilj rešitve</h2>
@@ -78,117 +105,103 @@
             okoljskim tveganjem, kot so poplave, zemeljski plazovi, potresi, požarna ogroženost, onesnažen zrak in
             dolgoročni vplivi podnebnih sprememb. Podatki o kulturni dediščini in o nevarnostih sicer obstajajo v
             odprtih javnih zbirkah, vendar so razpršeni med več institucijami in jih je težko povezati v enotno,
-            praktično uporabno sliko tveganja.
+            praktično in uporabno sliko tveganja.
         </p>
         <p>
-            Naša rešitev bo zato združila register nepremične kulturne dediščine z izbranimi okoljskimi in nevarnostnimi
-            tveganji ter za posamezno enoto dediščine ocenila stopnjo ogroženosti po metodi
-            <a
-                href="https://www.gov.si/assets/ministrstva/MK/DEDISCINA/ISeD/RNPD/Ocena_ogrozenosti_2022-08-10.pdf"
-                target="_blank"
-                class="alter-link-look"
-            >
-                "English Heritage lestvice" </a
-            >, ki temelji na oceni stanja in uporabe dediščine. Cilj je izdelati orodje, s katerim bodo konservatorji,
-            restavratorji, občine, raziskovalci in drugi odločevalci lahko videli, katera arheološka najdišča, stavbe,
-            parki, spominski in drugi objekti ali območja potrebujejo več pozornosti, kateri dejavniki tveganja so
-            najpomembnejši in kje je smiselno najprej vlagati v preventivno zaščito in nadzor.
+            Naša rešitev bo zato združila <strong>register nepremične kulturne dediščine</strong> z izbranimi okoljskimi
+            in nevarnostnimi tveganji ter za posamezno enoto dediščine ocenila stopnjo ogroženosti po metodi "<strong
+                >English Heritage lestvice</strong
+            >"<sup class="ref">1</sup>, ki temelji na oceni stanja in uporabe dediščine. Cilj je izdelati orodje, s
+            katerim bodo konservatorji, restavratorji, občine, raziskovalci in drugi odločevalci imeli informacije,
+            kateri objekti in območja potrebujejo več pozornosti ter kateri dejavniki tveganja so najpomembnejši. V
+            postopku načrtovanja porabe javnih sredstev bi odločevalci te informacije lahko uporabili pri določanju
+            prioritet za varovanje in ohranjanje kulturne dediščine.
         </p>
 
         <h2>Metodologija in uporabljena programska oprema</h2>
         <p>
-            Tehnično rešitev gradimo kot spletno aplikacijo z interaktivnim zemljevidom in . Jedro prototipa temelji na
-            Python/FastAPI zaledju in React/Vite uporabniškem vmesniku, ki že omogoča prikaz lokacij kulturne dediščine,
-            iskanje po registru in pregled osnovnih metapodatkov. V naslednjem koraku bomo dodali modul za izračun
-            tveganja ter prikaz razlage tveganja na ravni posamezne lokacije.
+            Naša rešitev temelji na registru nepremične kulturne dediščine, pridobljenem na portalu OPSI, ki ga bomo z
+            uporabo Python-a in knjižnice GeoPandas dopolnili s podatki stopnje ogroženosti pred posameznimi naravnimi
+            nesrečami. Uporabili bomo <strong>superračunalniško infrastrukturo</strong> (Arnesova računska gruča) za
+            prostorsko analizo, scenarijske izračune in množično obdelavo podatkov Z uporabo naše podatkovne baze,
+            superračunalniških analiz in izračunov ter velikih jezikovnih modelov za iskanje dodatnih informacij, bomo
+            vsakemu zapisu v registru dodali tudi splošen <strong>indeks ogroženosti</strong>, ki bo temeljil na
+            lestvici, ki je definirana s strani ministrstva za kulturo.
         </p>
         <p>
-            Za obdelavo podatkov bomo uporabili geoprostorski pristop: vhodne sloje bomo prostorsko uskladili, očistili
-            in pretvorili v enoten format za nadaljnjo analizo. Osnovna verzija klasifikatorja bo razložljiv
-            večkriterijski model oziroma uteženi indeks, ki bo upošteval preseke enot dediščine z območji poplavne,
-            plazovne, potresne in požarne nevarnosti ter dodatne okoljske kazalnike (na primer kakovost zraka, meritve
-            meteoroloških postaj in klimatske odklone). Če bo med tekmovanjem dovolj časa za validacijo, bomo isti nabor
-            značilk preizkusili še z nadzorovanim modelom (na primer logistično regresijo ali gradientnim boostingom),
-            vendar bo tudi v tem primeru poudarek na razložljivosti rezultatov.
+            Uporabniku bo na voljo interaktivni zemljevid s podatki iz registra kulturne dediščine in
+            <strong>klepetalnik</strong>, katerega odgovori bodo temeljili na naših podatkih. Definirali bomo razne
+            funkcije in orodja za dostop do naše baze, preko katerih bo veliki jezikovni model z
+            <strong>rekurzivnim klicanjem</strong> in <strong>tool-callingom</strong> posredoval željene podatke v
+            uporabniku prijazni obliki. Jezikovni model bo lahko preko spleta dostopal tudi do aktualnih in bolj ažurnih
+            informacij, kot so na voljo na javnih portalih. Teh informacij na strežniški strani ne bomo hranili iz
+            prostorskih in pravnih vidikov (zaščita avtorskih pravic). Za vsako uporabljeno spletno stran bo model dodal
+            povezave do svojih virov oziroma jih citiral.
         </p>
         <p>
-            Umetna inteligenca bo uporabljena smiselno in pregledno: ne kot črna skrinjica, temveč za podporo
-            razvrščanju in za generiranje razumljivih slovenskih povzetkov tveganja na podlagi strukturiranih
-            rezultatov. Po potrebi bomo za obsežnejše prostorske preseke in modelne eksperimente uporabili tudi
-            superračunalniške zmogljivosti, če bodo med HackathONom na voljo, vendar je rešitev zasnovana tako, da
-            ostane ponovljiva tudi brez tega koraka.
+            Za superračunalniške analize in obdelavo podatkov bomo uporabili Python in dodatne knjižnice, kot so Pandas,
+            Geopandas in NumPy. Za zaledni del spletne aplikacije pa bomo uporabili spletno ogrodje FastAPI. Klicali
+            bomo tudi API za veliki jezikovni model. Sam uporabniški vmesnik pa bo zgrajen s knjižnico React.
         </p>
 
         <h2>Viri odprtih podatkov in ravnanje z njimi</h2>
         <p>
-            Ključni vir bo Register nepremične kulturne dediščine, dopolnjen s podatki o varstvenih režimih kulturne
-            dediščine (eVRD). Nad tem jedrnim slojem bomo uporabili odprte javne podatke z OPSI in povezanih javnih
-            evidenc:
+            Ključni vir je register nepremične kulturne dediščine. Nad tem jedrnim slojem bomo uporabili odprte javne
+            podatke s portala <strong>OPSI</strong> in drugih javnih evidenc:
         </p>
         <ul>
-            <li>opozorilno karto poplav in karto verjetnosti pojavljanja zemeljskih ter hribinskih plazov,</li>
-            <li>karto potresne nevarnosti in sloj požarno ogroženih gozdov,</li>
-            <li>
-                ARSO podatke o kakovosti zunanjega zraka, padavinah in meritvah na samodejnih meteoroloških postajah,
-            </li>
-            <li>rezultate podnebnih sprememb za 30-letna obdobja in sedanje stanje,</li>
-            <li>
-                po potrebi tudi evidenco naravnih in drugih nesreč kot pilotni vir za preverjanje oziroma validacijo.
-            </li>
+            <li>opozorilna karta poplav,</li>
+            <li>karta verjetnosti zemeljskih ter hribinskih plazov,</li>
+            <li>karta potresne nevarnosti,</li>
+            <li>karta požarno ogroženih gozdov,</li>
+            <li>evidenca naravnih in drugih nesreč.</li>
         </ul>
         <p>
-            Ker gre za različne formate in ravni prostorske natančnosti, bomo podatke hranili ločeno na tri ravni: (1)
-            izvorni nespremenjeni prenosi, (2) očiščeni in normalizirani delovni sloji, (3) izpeljani rezultati, kot so
-            ocene ogroženosti, razlage dejavnikov in morebitne agregacije po občinah ali tipih dediščine. Pri vsakem
-            sloju bomo zapisali vir, datum prevzema, tip datoteke, prostorski referenčni sistem, izvedene transformacije
-            in pogoje ponovne uporabe.
-        </p>
-        <p>
             Podatki, ki jih bomo proizvedli med tekmovanjem, bodo zajemali programsko kodo, dokumentacijo postopka,
-            očiščene pomožne podatkovne sloje, konfiguracije modela, izhodne tabele z ocenami tveganja in prototip
-            spletne aplikacije. Načrtujemo, da bomo kodo javno objavili v repozitoriju GitHub, stabilno verzijo projekta
-            pa skupaj z metapodatki, opisom metodologije in končnimi artefakti arhivirali v Zenodo. S tem želimo slediti
-            načelom FAIR: da bodo rezultati najdljivi, dostopni, interoperabilni in ponovno uporabni. Javna objava
-            izpeljanih podatkov bo izvedena le v obsegu, ki je združljiv s pogoji ponovne uporabe posameznih izvornih
-            zbirk, ob doslednem navajanju vira in licence.
+            pomožne podatkovne sloje in izhodne tabele z ocenami tveganja. Programska koda bo v fazi razvoja dostopnja
+            na portalu <strong>GitHub</strong>, po končanem projektu pa bo dostopna tudi na portalu
+            <strong>Zenodo</strong>. S tem želimo slediti načelom odprte znanosti: da bodo rezultati najdljivi, dostopni
+            in ponovno uporabni.
+        </p>
+
+        <h2>Predvideni rezultati in mogoče težave</h2>
+        <p>
+            Predvideni rezultat je delujoča aplikacija z interaktivnim prikazom ogroženosti kulturne dediščine, osnovnim
+            indeksom tveganja za posamezne enote ter klepetalnikom. Vzpostavljena bo tudi podatkovna obdelava, ki
+            omogoča nadaljnjo nadgradnjo in vključitev dodatnih virov.
         </p>
         <p>
-            Pomembno je tudi, da rešitev ne temelji na osebnih podatkih. Obdelovali bomo predvsem javno dostopne
-            geoprostorske, okoljske in registrske podatke, zato je tveganje za poseg v zasebnost nizko; kljub temu bomo
-            pazili, da v končnih izpeljanih objavah ne ustvarjamo zavajajočih ali nepreverjenih interpretacij.
+            Zaradi časovnih omejitev nismo popolnoma prepričani ali nam bo na superračunalniku uspelo izvesti vse kar
+            smo si zadali.
         </p>
+        <!-- <p>
+            Glavni izzivi so razdrobljenost in neenotnost podatkov, združevanje različnih tveganj v smiselno oceno ter
+            zanesljivost odgovorov jezikovnega modela.
+        </p> -->
 
         <h2>Nasljavljanje ciljev trajnostnega razvoja UNESCO</h2>
         <p>
-            Naša rešitev neposredno naslavlja cilj trajnostnega razvoja
-            <a
-                href="https://www.uis.unesco.org/en/methods-and-tools/sdg114-indicators"
-                target="_blank"
-                class="alter-link-look"
-            >
-                <strong>SDG 11.4</strong></a
-            >, ki spodbuja k varovanju in ohranjanju svetovne kulturne in naravne dediščine. Na lokalni ravni v
-            Sloveniji to pomeni boljše odločanje o tem, katerim enotam kulturne dediščine nameniti posebno pozornost,
-            sredstva in zaščitne ukrepe, zlasti kadar so finančna sredstva omejena.
+            Naša rešitev neposredno naslavlja cilj trajnostnega razvoja <strong>SDG 11.4</strong>, ki spodbuja k
+            varovanju in ohranjanju svetovne kulturne in naravne dediščine. Na državni in lokalni ravni to pomeni boljše
+            odločanje o tem, katerim enotam kulturne dediščine nameniti posebno pozornost in zaščitne ukrepe, ob
+            upoštevanju dejstva da so finančna sredstva za njihovo zaščito omejena.
         </p>
         <p>
-            Rešitev hkrati posredno naslavlja tudi
-            <a
-                href="https://sdgs.un.org/goals/goal13?utm_source=chatgpt.com#targets_and_indicators"
-                target="_blank"
-                class="alter-link-look"
-            >
-                <strong>SDG 13</strong></a
-            >
-            (podnebni ukrepi), predvsem krepitev odpornosti na podnebno pogojene nevarnosti (SDG 13.1) in izboljšanje
-            uporabe podatkov pri prilagajanju na podnebne spremembe. V praksi pomeni, da kulturne dediščine ne
-            obravnavamo ločeno od podnebnih in okoljskih procesov, temveč kot del širše odpornosti slovenskega prostora
-            (poročilo Evropske komisije o odpornosti kulturne dediščine na podnebne spremembe).
-            <!-- https://www.espon.eu/sites/default/files/events/files/2024-11/eu-omc-group-report-on-cultural-heritage-and-climate-change_j.-leissner.pdf?utm_source=chatgpt.com -->
-            <!-- 
-            Cultural Heritage and Climate Change needs to be considered in all policies and planning decisions
-            (ministries of finances, economy, environment, spatial planning, mobility and culture) on all levels  
-            -->
+            Rešitev posredno naslavlja tudi <strong>SDG 13</strong>, predvsem krepitev odpornosti na podnebno pogojene
+            nevarnosti (SDG 13.1) in izboljšanje uporabe podatkov pri prilagajanju na podnebne spremembe. V praksi
+            pomeni, da kulturne dediščine ne obravnavamo ločeno od podnebnih in okoljskih procesov, temveč kot del širše
+            odpornosti slovenskega prostora.
         </p>
+
+        <div class="sources">
+            <h2>Viri</h2>
+            <ol>
+                <li>
+                    Ministrstvo za kulturo Republike Slovenije. <i>Ocena ogroženosti nepremične kulturne dediščine</i>,
+                    10. 8. 2022. Dostopno na:
+                    https://www.gov.si/assets/ministrstva/MK/DEDISCINA/ISeD/RNPD/Ocena_ogrozenosti_2022-08-10.pdf
+                </li>
+            </ol>
+        </div>
     </body>
 </html>

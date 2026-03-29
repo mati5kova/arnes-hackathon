@@ -7,66 +7,63 @@ from openai import OpenAI
 
 DATA_DIR = Path(__file__).parent 
 load_dotenv()
+DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o") #za testiranje spreminjamo model v `.env` da ni treba spreminjat kode
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 gdf = gpd.read_file(DATA_DIR / "kd_z_nevarnost.geojson")
-
+    
 TOOLS = [
     {
         "type": "function",
-        "function": {
-            "name": "top_k_endangered_in_region",
-            "description": "Returns a list of the top k endangered objects in a region of a certain type of endangerment.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "isRegija": {
-                        "type": "boolean",
-                        "description": "True to filter by regija/region, False to filter by municipality/OBCINA"
-                    },
-                    "regija": {
-                        "type": "string",
-                        "description": "The region or municipality to filter by. Municipalities are ALL UPPERCASE, regions have First Letter Uppercase."
-                    },
-                    "endangerment": {
-                        "type": "string",
-                        "enum": ["poplave", "pozar", "plazovi", "potres"],
-                        "description": "The type of endangerment to rank by."
-                    },
-                    "k": {
-                        "type": "integer",
-                        "description": "How many top results to return. If omitted, returns all with the max value."
-                    }
+        "name": "top_k_endangered_in_region",
+        "description": "Returns a list of the top k endangered objects in a region of a certain type of endangerment.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "isRegija": {
+                    "type": "boolean",
+                    "description": "True to filter by regija/region, False to filter by municipality/OBCINA"
                 },
-                "required": ["isRegija", "regija", "endangerment"],
-                "additionalProperties": False
+                "regija": {
+                    "type": "string",
+                    "description": "The region or municipality to filter by. Municipalities are ALL UPPERCASE, regions have First Letter Uppercase."
+                },
+                "endangerment": {
+                    "type": "string",
+                    "enum": ["poplave", "pozar", "plazovi", "potres"],
+                    "description": "The type of endangerment to rank by."
+                },
+                "k": {
+                    "type": "integer",
+                    "description": "How many top results to return. If omitted, returns all with the max value."
+                }
             },
-            "strict": False
-        }
+            "required": ["isRegija", "regija", "endangerment"],
+            "additionalProperties": False
+        },
+        "strict": False
     },
     {
         "type": "function",
-        "function": {
-            "name": "get_info_by_eid",
-            "description": "Returns information about a specific cultural heritage object by its EID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "eid": {
-                        "type": "string",
-                        "description": "The EID of the object."
-                    },
-                    "columns": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Columns to return."
-                    }
+        "name": "get_info_by_eid",
+        "description": "Returns information about a specific cultural heritage object by its EID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "eid": {
+                    "type": "string",
+                    "description": "The EID of the object."
                 },
-                "required": ["eid"],
-                "additionalProperties": False
+                "columns": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Columns to return."
+                }
             },
-            "strict": False
-        }
+            "required": ["eid"],
+            "additionalProperties": False
+        },
+        "strict": False
     },
     {
         "type": "web_search_preview"
@@ -105,7 +102,8 @@ def dispatch_tool(name, args):
 #------------------------------------------------------------------------
 conversation_history = []
 #openai api code 
-def run(user_message, model = "gpt-4o"):
+def run(user_message, model=None):
+    model = model or DEFAULT_MODEL
     conversation_history.append({"role":"user", "content":user_message})
 
     for x in range(15):             #for loop just for loop safety. In general its while True:
