@@ -13,7 +13,7 @@ By default it runs fully from local files (no dependency on OPSI/network).
 - `GET /api/heritage-sites?bbox=minLng,minLat,maxLng,maxLat&zoom=8` (clustered map points)
 - `GET /api/heritage-sites/{site_id}`
 - `GET /api/overlays` (available overlay catalog)
-- `GET /api/overlays/{kind}?bbox=...&zoom=...` (`kind` = `fire|flood|air|landslide`, backend-aggregated for rendering performance)
+- `GET /api/overlays/{kind}?bbox=...&zoom=...` (`kind` = `fire|flood|air|landslide`, backend-aggregated for rendering performance; heavy area overlays switch to low-zoom grid cells for faster delivery)
 
 ### FastAPI Docs
 

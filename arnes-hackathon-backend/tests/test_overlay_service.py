@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from overlays import service
 from overlays import spatial_sources
 
@@ -194,3 +196,85 @@ def test_select_visible_areas_reuses_per_zoom_render_cache(monkeypatch):
 
     assert simplify_call_count["count"] == 1
     assert first["areas"][0] is second["areas"][0]
+
+
+def test_get_target_max_area_grid_cells_grows_with_zoom_and_respects_cap(monkeypatch):
+    monkeypatch.setattr(service, "OVERLAY_MAX_AREA_GRID_CELLS", 2400)
+
+    overview = service.get_target_max_area_grid_cells(5)
+    closeup = service.get_target_max_area_grid_cells(10)
+
+    assert overview < closeup
+    assert closeup <= 2400
+
+
+def test_list_overlay_grid_area_mode_uses_grid_cells_when_enabled(monkeypatch):
+    dataset = {
+        "loaded_at": 1762230400456.0,
+        "points_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "areas_by_kind": {
+            "fire": [],
+            "flood": [
+                {
+                    "id": "flood:1",
+                    "score": 3.0,
+                    "normalized": 1.0,
+                    "level": 4,
+                    "bounds": [14.0, 46.0, 14.2, 46.2],
+                    "ring": [(14.0, 46.0), (14.2, 46.0), (14.2, 46.2), (14.0, 46.2), (14.0, 46.0)],
+                }
+            ],
+            "air": [],
+            "landslide": [],
+        },
+        "area_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+    }
+
+    monkeypatch.setattr(service, "get_overlay_dataset", lambda refresh=False: dataset)
+    monkeypatch.setattr(service, "should_use_area_grid", lambda *, kind, zoom: True)
+    monkeypatch.setattr(
+        service,
+        "aggregate_areas_to_grid",
+        lambda **kwargs: {
+            "cells": [
+                {
+                    "id": "cell:0:0",
+                    "score": 2.8,
+                    "normalized": 0.9,
+                    "level": 4,
+                    "sampleCount": 1,
+                    "bounds": [14.0, 46.0, 14.1, 46.1],
+                }
+            ],
+            "sample_count": 1,
+            "cell_size_deg": 0.1,
+        },
+    )
+
+    payload = service.list_overlay_grid(kind="flood", bbox=[13.9, 45.9, 14.3, 46.3], zoom=8)
+
+    assert payload["areas"] == []
+    assert payload["cells"][0]["id"] == "cell:0:0"
+    assert payload["sampleCount"] == 1
+    assert payload["gridCellSizeDeg"] == 0.1
+
+
+@pytest.mark.skipif(not service.HAS_RASTERIO, reason="rasterio is required for area-grid rasterization tests")
+def test_build_area_grid_cells_with_rasterio_returns_non_empty_cells():
+    cells = service.build_area_grid_cells_with_rasterio(
+        areas=[
+            {
+                "id": "area:1",
+                "normalized": 0.75,
+                "ring": [(14.0, 46.0), (14.1, 46.0), (14.1, 46.1), (14.0, 46.1), (14.0, 46.0)],
+            }
+        ],
+        bbox=[13.95, 45.95, 14.15, 46.15],
+        cell_size_deg=0.02,
+        score_min=1.0,
+        score_max=4.0,
+    )
+
+    assert cells
+    assert all("bounds" in cell for cell in cells)
+    assert all(cell["normalized"] > 0 for cell in cells)

@@ -11,11 +11,25 @@ from typing import Any
 
 from .spatial_sources import (
     build_area_spatial_index,
+    compute_areas_bounds,
     load_fire_geojson_areas,
     load_flood_shapefile_areas,
     load_landslide_shapefile_areas,
+    select_bbox_candidates,
     select_visible_areas,
 )
+
+try:
+    from rasterio.enums import MergeAlg
+    from rasterio.features import rasterize
+    from rasterio.transform import from_origin
+
+    HAS_RASTERIO = True
+except Exception:  # pragma: no cover - exercised only when optional deps are missing
+    MergeAlg = None
+    rasterize = None
+    from_origin = None
+    HAS_RASTERIO = False
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 OVERLAY_HAZARD_FILE = os.getenv("OVERLAY_HAZARD_FILE", str(BASE_DIR / "AI" / "kd_z_nevarnost.geojson"))
@@ -48,6 +62,14 @@ OVERLAY_CACHE_TTL_MS = int(os.getenv("OVERLAY_CACHE_TTL_MS", str(1000 * 60 * 30)
 # Absolute backend safety cap. Runtime target is still zoom-adaptive and usually lower.
 OVERLAY_MAX_GRID_CELLS = max(256, int(os.getenv("OVERLAY_MAX_GRID_CELLS", "7500")))
 OVERLAY_MAX_AREA_ITEMS = max(1200, int(os.getenv("OVERLAY_MAX_AREA_ITEMS", "32000")))
+OVERLAY_MAX_AREA_GRID_CELLS = max(320, int(os.getenv("OVERLAY_MAX_AREA_GRID_CELLS", "4200")))
+OVERLAY_AREA_GRID_MIN_ZOOM = max(3, int(os.getenv("OVERLAY_AREA_GRID_MIN_ZOOM", "3")))
+OVERLAY_AREA_GRID_MAX_ZOOM = min(18, max(OVERLAY_AREA_GRID_MIN_ZOOM, int(os.getenv("OVERLAY_AREA_GRID_MAX_ZOOM", "11"))))
+OVERLAY_AREA_GRID_KINDS = frozenset(
+    kind.strip()
+    for kind in os.getenv("OVERLAY_AREA_GRID_KINDS", "flood,landslide").split(",")
+    if kind.strip()
+)
 OVERLAY_VIEW_CACHE_SIZE = max(32, int(os.getenv("OVERLAY_VIEW_CACHE_SIZE", "320")))
 
 OVERLAY_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -136,9 +158,11 @@ def list_overlay_grid(
     dataset = get_overlay_dataset(refresh=refresh)
     overlay_mode = str(definition.get("mode") or "point_grid")
     zoom_int = clamp_int(int(round(zoom)) if isinstance(zoom, (int, float)) else 8, 3, 18)
+    use_area_grid = overlay_mode == "area" and should_use_area_grid(kind=kind, zoom=zoom_int)
+    view_mode = f"{overlay_mode}_grid" if use_area_grid else overlay_mode
     view_cache_key = build_view_cache_key(
         kind=kind,
-        mode=overlay_mode,
+        mode=view_mode,
         bbox=bbox,
         zoom=zoom_int,
         generated_at=float(dataset.get("loaded_at") or 0.0),
@@ -151,18 +175,33 @@ def list_overlay_grid(
         areas = dataset["areas_by_kind"].get(kind, [])
         area_index_by_kind = dataset.get("area_index_by_kind")
         area_index = area_index_by_kind.get(kind) if isinstance(area_index_by_kind, dict) else None
-        selection = select_visible_areas(
-            areas=areas,
-            bbox=bbox,
-            zoom=zoom_int,
-            max_items=get_target_max_area_items(zoom_int),
-            area_index=area_index,
-        )
-        visible_areas = selection["areas"]
-        sample_count = int(selection["in_view_count"])
-        total_available = len(areas)
-        cells: list[dict[str, Any]] = []
-        cell_size_deg = 0.0
+        if use_area_grid:
+            aggregated = aggregate_areas_to_grid(
+                areas=areas,
+                bbox=bbox,
+                zoom=zoom_int,
+                score_min=float(definition["scoreMin"]),
+                score_max=float(definition["scoreMax"]),
+                area_index=area_index,
+            )
+            visible_areas = []
+            sample_count = aggregated["sample_count"]
+            total_available = len(areas)
+            cells = aggregated["cells"]
+            cell_size_deg = aggregated["cell_size_deg"]
+        else:
+            selection = select_visible_areas(
+                areas=areas,
+                bbox=bbox,
+                zoom=zoom_int,
+                max_items=get_target_max_area_items(zoom_int),
+                area_index=area_index,
+            )
+            visible_areas = selection["areas"]
+            sample_count = int(selection["in_view_count"])
+            total_available = len(areas)
+            cells = []
+            cell_size_deg = 0.0
     else:
         points = dataset["points_by_kind"].get(kind, [])
         aggregated = aggregate_points_to_grid(
@@ -512,6 +551,152 @@ def aggregate_points_to_grid(
     }
 
 
+def should_use_area_grid(*, kind: str, zoom: int) -> bool:
+    if not HAS_RASTERIO:
+        return False
+    if kind not in OVERLAY_AREA_GRID_KINDS:
+        return False
+    return OVERLAY_AREA_GRID_MIN_ZOOM <= zoom <= OVERLAY_AREA_GRID_MAX_ZOOM
+
+
+def aggregate_areas_to_grid(
+    *,
+    areas: list[dict[str, Any]],
+    bbox: list[float] | None,
+    zoom: int,
+    score_min: float,
+    score_max: float,
+    area_index: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not areas or not HAS_RASTERIO:
+        return {"cells": [], "sample_count": 0, "cell_size_deg": 0.0}
+
+    active_bbox = bbox if bbox else infer_area_bounds(areas=areas, area_index=area_index)
+    if not active_bbox:
+        return {"cells": [], "sample_count": 0, "cell_size_deg": 0.0}
+
+    candidates = (
+        select_bbox_candidates(areas=areas, bbox=active_bbox, area_index=area_index)
+        if bbox
+        else areas
+    )
+    if not candidates:
+        return {"cells": [], "sample_count": 0, "cell_size_deg": 0.0}
+
+    base_cell_size = get_grid_cell_size_degrees(zoom)
+    max_target_cells = get_target_max_area_grid_cells(zoom)
+    chosen_cell_size = base_cell_size
+    aggregated_cells: list[dict[str, Any]] = []
+
+    for attempt in range(8):
+        cell_size = base_cell_size * (2**attempt)
+        cells = build_area_grid_cells_with_rasterio(
+            areas=candidates,
+            bbox=active_bbox,
+            cell_size_deg=cell_size,
+            score_min=score_min,
+            score_max=score_max,
+        )
+        aggregated_cells = cells
+        chosen_cell_size = cell_size
+        if len(cells) <= max_target_cells:
+            break
+
+    aggregated_cells.sort(key=lambda cell: (cell["level"], cell["id"]))
+    return {
+        "cells": aggregated_cells,
+        "sample_count": len(candidates),
+        "cell_size_deg": round(chosen_cell_size, 6),
+    }
+
+
+def build_area_grid_cells_with_rasterio(
+    *,
+    areas: list[dict[str, Any]],
+    bbox: list[float],
+    cell_size_deg: float,
+    score_min: float,
+    score_max: float,
+) -> list[dict[str, Any]]:
+    if not HAS_RASTERIO or rasterize is None or from_origin is None or MergeAlg is None:
+        return []
+
+    min_lng, min_lat, max_lng, max_lat = bbox
+    if max_lng <= min_lng or max_lat <= min_lat:
+        return []
+
+    width = max(1, int(math.ceil((max_lng - min_lng) / cell_size_deg)))
+    height = max(1, int(math.ceil((max_lat - min_lat) / cell_size_deg)))
+    transform = from_origin(min_lng, max_lat, cell_size_deg, cell_size_deg)
+
+    weighted_shapes: list[tuple[dict[str, Any], float]] = []
+    count_shapes: list[tuple[dict[str, Any], int]] = []
+
+    for area in sorted(areas, key=lambda candidate: float(candidate.get("normalized") or 0.0)):
+        ring = area.get("ring")
+        if not isinstance(ring, list) or len(ring) < 4:
+            continue
+        geometry = {"type": "Polygon", "coordinates": [ring]}
+        normalized = min(1.0, max(0.0, float(area.get("normalized") or 0.0)))
+        weighted_shapes.append((geometry, normalized))
+        count_shapes.append((geometry, 1))
+
+    if not weighted_shapes:
+        return []
+
+    normalized_raster = rasterize(
+        shapes=weighted_shapes,
+        out_shape=(height, width),
+        transform=transform,
+        fill=0.0,
+        dtype="float32",
+        all_touched=True,
+    )
+    count_raster = rasterize(
+        shapes=count_shapes,
+        out_shape=(height, width),
+        transform=transform,
+        fill=0,
+        dtype="uint16",
+        all_touched=True,
+        merge_alg=MergeAlg.add,
+    )
+
+    cells: list[dict[str, Any]] = []
+    for grid_y in range(height):
+        for grid_x in range(width):
+            normalized = float(normalized_raster[grid_y, grid_x])
+            if normalized <= 0.0:
+                continue
+
+            normalized_clamped = min(1.0, max(0.0, normalized))
+            score = score_min + normalized_clamped * (score_max - score_min)
+            level = normalized_to_level(normalized_clamped)
+
+            cell_min_lng = min_lng + grid_x * cell_size_deg
+            cell_max_lng = min(max_lng, cell_min_lng + cell_size_deg)
+            cell_max_lat = max_lat - grid_y * cell_size_deg
+            cell_min_lat = max(min_lat, cell_max_lat - cell_size_deg)
+
+            cells.append(
+                {
+                    "id": f"cell:{grid_x}:{grid_y}",
+                    "score": round(score, 3),
+                    "normalized": round(normalized_clamped, 4),
+                    "level": level,
+                    "sampleCount": int(count_raster[grid_y, grid_x]) or 1,
+                    "bounds": [
+                        round(cell_min_lng, 6),
+                        round(cell_min_lat, 6),
+                        round(cell_max_lng, 6),
+                        round(cell_max_lat, 6),
+                    ],
+                }
+            )
+
+    return cells
+
+
 def build_grid_cells(
     *,
     points: list[tuple[float, float, float]],
@@ -638,10 +823,27 @@ def get_target_max_grid_cells(zoom: int) -> int:
     return clamp_int(zoom_adaptive_target, 600, OVERLAY_MAX_GRID_CELLS)
 
 
+def get_target_max_area_grid_cells(zoom: int) -> int:
+    # Cell overlays keep low-zoom area rendering detailed but bounded.
+    zoom_adaptive_target = 900 + max(0, zoom - 6) * 520
+    return clamp_int(zoom_adaptive_target, 600, OVERLAY_MAX_AREA_GRID_CELLS)
+
+
 def get_target_max_area_items(zoom: int) -> int:
     # Keep area overlays rich while reducing payload and render pressure at low zoom.
     zoom_adaptive_target = 4000 + max(0, zoom - 6) * 1700
     return clamp_int(zoom_adaptive_target, 2200, OVERLAY_MAX_AREA_ITEMS)
+
+
+def infer_area_bounds(*, areas: list[dict[str, Any]], area_index: dict[str, Any] | None) -> list[float] | None:
+    if isinstance(area_index, dict):
+        bounds = area_index.get("bounds")
+        if isinstance(bounds, list) and len(bounds) == 4:
+            return [float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])]
+    computed = compute_areas_bounds(areas)
+    if not computed:
+        return None
+    return [float(computed[0]), float(computed[1]), float(computed[2]), float(computed[3])]
 
 
 def to_number(value: Any) -> float | None:

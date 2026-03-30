@@ -406,7 +406,7 @@ async def overlays_catalog(response: Response) -> Dict[str, Any]:
     description=(
         "Returns overlay data for the current map viewport.\n\n"
         "This endpoint is optimized for map rendering performance:\n"
-        "- Area overlays return hazard polygons clipped and simplified for current zoom\n"
+        "- Area overlays return hazard polygons at high zoom and detailed grid cells at low zoom\n"
         "- Point overlays return aggregated grid cells (for station-based datasets)\n"
         "- Density is bounded server-side to prevent frontend overload\n"
         "- Scores are normalized to a shared low-to-high scale (least to most endangered)\n"
