@@ -11,7 +11,7 @@ DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o") #za testiranje spreminjamo m
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 gdf = gpd.read_file(DATA_DIR / "kd_z_nevarnost.geojson")
-
+    
 TOOLS = [
     {
         "type": "function",
