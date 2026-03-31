@@ -59,7 +59,7 @@ export const messages = {
             inputPlaceholder: "Ask about heritage risks...",
             sendMessageAria: "Send message",
             welcome:
-                "Hello! I'm your #PROJECT-NAME-PLACEHOLDER# assistant. Ask me about Slovenian cultural heritage sites, their risk levels, or environmental threats they face.",
+                "Hello! I'm your KULTURKO assistant. Ask me about Slovenian cultural heritage sites, their risk levels, or environmental threats they face.",
             demoReply:
                 "I'm currently running in demo mode. Connect me to the backend to enable AI-powered heritage risk analysis!",
         },
@@ -197,7 +197,7 @@ export const messages = {
             inputPlaceholder: "Vprašajte o tveganjih dediščine...",
             sendMessageAria: "Pošlji sporočilo",
             welcome:
-                "Pozdravljeni! Sem vaš pomočnik #PROJECT-NAME-PLACEHOLDER#. Vprašajte me o slovenskih enotah kulturne dediščine, njihovih ravneh tveganja ali okoljskih grožnjah.",
+                "Pozdravljeni! Sem vaš pomočnik KULTURKO. Vprašajte me o slovenskih enotah kulturne dediščine, njihovih ravneh tveganja ali okoljskih grožnjah.",
             demoReply:
                 "Trenutno delujem v demonstracijskem načinu. Povežite me z backendom, da omogočimo AI analizo tveganj dediščine!",
         },
