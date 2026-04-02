@@ -4,14 +4,18 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
+from openai import AzureOpenAI
 
 DATA_DIR = Path(__file__).parent 
 load_dotenv()
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o") #za testiranje spreminjamo model v `.env` da ni treba spreminjat kode
 
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-gdf = gpd.read_file(DATA_DIR / "kd_z_nevarnost.geojson")
-
+client = AzureOpenAI(
+    api_key=os.environ["AZURE_OPENAI_API_KEY"],
+    base_url=""
+    )
+gdf = gpd.read_file(DATA_DIR / "Data/kd_z_nevarnost.geojson")
+    
 TOOLS = [
     {
         "type": "function",
