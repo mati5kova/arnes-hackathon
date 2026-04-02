@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from pathlib import Path
+
 import pytest
 
 from overlays import service
@@ -278,3 +281,93 @@ def test_build_area_grid_cells_with_rasterio_returns_non_empty_cells():
     assert cells
     assert all("bounds" in cell for cell in cells)
     assert all(cell["normalized"] > 0 for cell in cells)
+
+
+def test_overlay_source_paths_exist():
+    source_paths = {
+        "OVERLAY_HAZARD_FILE": service.OVERLAY_HAZARD_FILE,
+        "OVERLAY_AIR_FILE": service.OVERLAY_AIR_FILE,
+        "OVERLAY_FIRE_AREA_FILE": service.OVERLAY_FIRE_AREA_FILE,
+        "OVERLAY_FLOOD_FREQUENT_SHP": service.OVERLAY_FLOOD_FREQUENT_SHP,
+        "OVERLAY_FLOOD_RARE_SHP": service.OVERLAY_FLOOD_RARE_SHP,
+        "OVERLAY_FLOOD_VERY_RARE_SHP": service.OVERLAY_FLOOD_VERY_RARE_SHP,
+        "OVERLAY_LANDSLIDE_SHP": service.OVERLAY_LANDSLIDE_SHP,
+        "OVERLAY_LANDSLIDE_DBF": service.OVERLAY_LANDSLIDE_DBF,
+    }
+
+    missing = [
+        f"{name} -> {path}"
+        for name, path in source_paths.items()
+        if not Path(path).is_file()
+    ]
+    assert not missing, (
+        "Overlay source files are missing. If paths moved, update overlays/service.py defaults or "
+        "set the OVERLAY_* env vars.\n"
+        + "\n".join(missing)
+    )
+
+
+def _empty_overlay_cache() -> dict:
+    return {
+        "loaded_at": 0.0,
+        "loading": False,
+        "last_error": None,
+        "points_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "areas_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "area_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "source_meta": {
+            "hazard_file": service.OVERLAY_HAZARD_FILE,
+            "air_file": service.OVERLAY_AIR_FILE,
+            "fire_area_file": service.OVERLAY_FIRE_AREA_FILE,
+            "flood_frequent_shp": service.OVERLAY_FLOOD_FREQUENT_SHP,
+            "flood_rare_shp": service.OVERLAY_FLOOD_RARE_SHP,
+            "flood_very_rare_shp": service.OVERLAY_FLOOD_VERY_RARE_SHP,
+            "landslide_shp": service.OVERLAY_LANDSLIDE_SHP,
+            "landslide_dbf": service.OVERLAY_LANDSLIDE_DBF,
+        },
+    }
+
+
+@pytest.fixture
+def restore_overlay_cache_state():
+    original_cache = deepcopy(service.overlay_cache)
+    original_view_cache = deepcopy(service.overlay_view_cache)
+    try:
+        yield
+    finally:
+        service.overlay_cache.clear()
+        service.overlay_cache.update(original_cache)
+        service.overlay_view_cache.clear()
+        service.overlay_view_cache.update(original_view_cache)
+
+
+def test_get_overlay_dataset_returns_stale_cache_when_refresh_load_fails(monkeypatch, restore_overlay_cache_state):
+    stale_cache = _empty_overlay_cache()
+    stale_cache["loaded_at"] = 123.0
+    stale_cache["points_by_kind"]["air"] = [(14.5, 46.1, 2.3)]
+    service.overlay_cache.clear()
+    service.overlay_cache.update(stale_cache)
+
+    def failing_load_points():
+        raise RuntimeError("simulated overlay loader failure")
+
+    monkeypatch.setattr(service, "load_overlay_points", failing_load_points)
+
+    result = service.get_overlay_dataset(refresh=True)
+
+    assert result["points_by_kind"]["air"] == [(14.5, 46.1, 2.3)]
+    assert result["loading"] is False
+    assert "simulated overlay loader failure" in str(result["last_error"])
+
+
+def test_get_overlay_dataset_raises_when_refresh_load_fails_without_stale_data(monkeypatch, restore_overlay_cache_state):
+    service.overlay_cache.clear()
+    service.overlay_cache.update(_empty_overlay_cache())
+
+    def failing_load_points():
+        raise RuntimeError("simulated overlay loader failure")
+
+    monkeypatch.setattr(service, "load_overlay_points", failing_load_points)
+
+    with pytest.raises(RuntimeError, match="Unable to load overlay data"):
+        service.get_overlay_dataset(refresh=True)

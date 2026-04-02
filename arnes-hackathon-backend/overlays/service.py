@@ -32,31 +32,31 @@ except Exception:  # pragma: no cover - exercised only when optional deps are mi
     HAS_RASTERIO = False
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-OVERLAY_HAZARD_FILE = os.getenv("OVERLAY_HAZARD_FILE", str(BASE_DIR / "AI" / "kd_z_nevarnost.geojson"))
-OVERLAY_AIR_FILE = os.getenv("OVERLAY_AIR_FILE", str(BASE_DIR / "AI" / "Data" / "zrak_postaje.geojson"))
+OVERLAY_HAZARD_FILE = os.getenv("OVERLAY_HAZARD_FILE", str(BASE_DIR / "AI" / "Data" / "kd_z_nevarnost.geojson"))
+OVERLAY_AIR_FILE = os.getenv("OVERLAY_AIR_FILE", str(BASE_DIR / "AI" / "Data_Processing" / "zrak_postaje.geojson"))
 OVERLAY_FIRE_AREA_FILE = os.getenv(
     "OVERLAY_FIRE_AREA_FILE",
-    str(BASE_DIR / "AI" / "Data" / "pozarna_ogrozenost_majhen_100m.geojson"),
+    str(BASE_DIR / "AI" / "Data_Processing" / "pozarna_ogrozenost_majhen_100m.geojson"),
 )
 OVERLAY_FLOOD_FREQUENT_SHP = os.getenv(
     "OVERLAY_FLOOD_FREQUENT_SHP",
-    str(BASE_DIR / "AI" / "Data" / "DRSV_OPKP_POGOSTE_POPL" / "DRSV_OPKP_POGOSTE_POPL.shp"),
+    str(BASE_DIR / "AI" / "Data_Processing" / "DRSV_OPKP_POGOSTE_POPL" / "DRSV_OPKP_POGOSTE_POPL.shp"),
 )
 OVERLAY_FLOOD_RARE_SHP = os.getenv(
     "OVERLAY_FLOOD_RARE_SHP",
-    str(BASE_DIR / "AI" / "Data" / "DRSV_OPKP_REDKE_POPL" / "DRSV_OPKP_REDKE_POPL.shp"),
+    str(BASE_DIR / "AI" / "Data_Processing" / "DRSV_OPKP_REDKE_POPL" / "DRSV_OPKP_REDKE_POPL.shp"),
 )
 OVERLAY_FLOOD_VERY_RARE_SHP = os.getenv(
     "OVERLAY_FLOOD_VERY_RARE_SHP",
-    str(BASE_DIR / "AI" / "Data" / "DRSV_OPKP_ZR_POPL" / "DRSV_OPKP_ZR_POPL.shp"),
+    str(BASE_DIR / "AI" / "Data_Processing" / "DRSV_OPKP_ZR_POPL" / "DRSV_OPKP_ZR_POPL.shp"),
 )
 OVERLAY_LANDSLIDE_SHP = os.getenv(
     "OVERLAY_LANDSLIDE_SHP",
-    str(BASE_DIR / "AI" / "Data" / "DRSV_Opk_Plazovi_skupna" / "plazovi2.shp"),
+    str(BASE_DIR / "AI" / "Data_Processing" / "DRSV_Opk_Plazovi_skupna" / "plazovi2.shp"),
 )
 OVERLAY_LANDSLIDE_DBF = os.getenv(
     "OVERLAY_LANDSLIDE_DBF",
-    str(BASE_DIR / "AI" / "Data" / "DRSV_Opk_Plazovi_skupna" / "plazovi2.dbf"),
+    str(BASE_DIR / "AI" / "Data_Processing" / "DRSV_Opk_Plazovi_skupna" / "plazovi2.dbf"),
 )
 OVERLAY_CACHE_TTL_MS = int(os.getenv("OVERLAY_CACHE_TTL_MS", str(1000 * 60 * 30)))
 # Absolute backend safety cap. Runtime target is still zoom-adaptive and usually lower.
