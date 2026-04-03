@@ -4,13 +4,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from threading import Thread
 from time import perf_counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi.concurrency import run_in_threadpool
 from fastapi import FastAPI, HTTPException, Path, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from chat_service import (
+    ChatServiceError,
+    generate_chat_reply,
+    get_chat_usage_summary,
+    get_default_chat_model_id,
+    list_chat_models,
+)
 from observability import get_metrics_snapshot, log_event, record_request, record_search_latency
 from overlays import list_overlay_catalog, list_overlay_grid
 from overlays.service import get_overlay_dataset
@@ -155,6 +162,73 @@ class ErrorResponse(BaseModel):
     detail: str = Field(description="Human-readable error detail.", examples=["Site not found"])
 
 
+class ChatCitation(BaseModel):
+    title: str = Field(description="Human-readable source title.", examples=["Recent flood report"])
+    url: str = Field(description="Source URL.", examples=["https://example.com/report"])
+
+
+class ChatModelDescriptor(BaseModel):
+    id: str = Field(description="Stable frontend-facing model identifier.", examples=["mdml-gpt5-001"])
+    label: str = Field(description="Display label for the configured model.", examples=["MDML-GPT5-001"])
+    deployment: str = Field(description="Azure OpenAI deployment name.", examples=["MDML-GPT5-001"])
+    available: bool = Field(description="True when this model is fully configured from environment variables.")
+    supportsWebSearch: bool = Field(description="True when the frontend may offer the web-search toggle.")
+    isDefault: bool = Field(description="True for the backend-selected default model.")
+    missingEnv: List[str] = Field(description="Missing environment variable names when model configuration is incomplete.")
+
+
+class ChatModelsResponse(BaseModel):
+    items: List[ChatModelDescriptor] = Field(description="Selectable chat models exposed to the frontend.")
+    defaultModelId: str = Field(description="Preferred default model identifier.", examples=["mdml-gpt5-001"])
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"] = Field(description="Chat message role.", examples=["user", "assistant"])
+    content: str = Field(description="Plain text message content.", examples=["Summarize fire risks near Ptuj."])
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage] = Field(description="Conversation history in chronological order.")
+    modelId: str = Field(description="Selected frontend model identifier.", examples=["mdml-gpt5-001"])
+    useWebSearch: bool = Field(
+        default=False,
+        description="Enable Azure web-search tool (`web_search_preview`) for this request.",
+    )
+
+
+class ChatResponse(BaseModel):
+    model: ChatModelDescriptor = Field(description="Metadata for the model that produced this response.")
+    message: ChatMessage = Field(description="Assistant reply.")
+    citations: List[ChatCitation] = Field(description="URL citations returned by the model.")
+    webSearchUsed: bool = Field(description="True when the model invoked the Azure web-search tool.")
+    responseId: str = Field(description="Provider response identifier.", examples=["resp_123"])
+
+
+class ChatUsageTotals(BaseModel):
+    inputTokens: int = Field(description="Accumulated input tokens.")
+    outputTokens: int = Field(description="Accumulated output tokens.")
+    totalTokens: int = Field(description="Accumulated total tokens.")
+    reasoningTokens: int = Field(description="Accumulated reasoning tokens when available.")
+
+
+class ChatUsageModelSummary(BaseModel):
+    modelId: str = Field(description="Stable frontend-facing model identifier.")
+    label: str = Field(description="Human-readable model label.")
+    deployment: str = Field(description="Azure deployment name.")
+    requestsTotal: int = Field(description="Total completed chat requests for this model.")
+    webSearchRequestsTotal: int = Field(description="Number of requests where web search was enabled and used.")
+    usageTotals: ChatUsageTotals = Field(description="Token totals accumulated for this model.")
+    lastUsedAt: Optional[str] = Field(default=None, description="Last successful use timestamp in UTC ISO-8601 format.")
+
+
+class ChatUsageSummaryResponse(BaseModel):
+    updatedAt: Optional[str] = Field(default=None, description="Last summary update timestamp in UTC ISO-8601 format.")
+    requestsTotal: int = Field(description="Total completed chat requests across all models.")
+    webSearchRequestsTotal: int = Field(description="Total completed requests that used web search.")
+    usageTotals: ChatUsageTotals = Field(description="Global token totals across all models.")
+    models: List[ChatUsageModelSummary] = Field(description="Per-model usage totals currently stored on disk.")
+
+
 class OverlayCatalogItem(BaseModel):
     kind: str = Field(description="Overlay key identifier.", examples=["fire", "flood", "air", "landslide"])
     label: str = Field(description="Display label for overlay toggle.", examples=["Fire danger"])
@@ -273,7 +347,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins or ["*"],
     allow_credentials=False,
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -384,6 +458,99 @@ async def metrics(response: Response) -> Dict[str, Any]:
             "loadCount": dataset_status["load_count"],
             "lastError": dataset_status["last_error"],
         },
+    }
+
+
+@app.get(
+    "/api/chat/models",
+    tags=["Chat"],
+    summary="List Configured Chat Models",
+    description="Returns model options for the chat sidebar, including env-configuration status and default selection.",
+    response_model=ChatModelsResponse,
+)
+async def chat_models(response: Response) -> Dict[str, Any]:
+    response.headers["cache-control"] = CACHE_CONTROL_DEFAULT
+    return {
+        "items": list_chat_models(),
+        "defaultModelId": get_default_chat_model_id(),
+    }
+
+
+@app.get(
+    "/api/chat/usage",
+    tags=["Chat"],
+    summary="Get Persisted Chat Usage Totals",
+    description="Returns request and token totals per chat model from the on-disk usage summary file.",
+    response_model=ChatUsageSummaryResponse,
+)
+async def chat_usage(response: Response) -> Dict[str, Any]:
+    summary = await run_in_threadpool(get_chat_usage_summary)
+    models = list(summary.get("models", {}).values()) if isinstance(summary.get("models"), dict) else []
+    models.sort(key=lambda item: str(item.get("label") or item.get("modelId") or ""))
+
+    response.headers["cache-control"] = CACHE_CONTROL_DEFAULT
+    return {
+        "updatedAt": summary.get("updatedAt"),
+        "requestsTotal": summary.get("requestsTotal", 0),
+        "webSearchRequestsTotal": summary.get("webSearchRequestsTotal", 0),
+        "usageTotals": summary.get("usageTotals", {}),
+        "models": models,
+    }
+
+
+@app.post(
+    "/api/chat",
+    tags=["Chat"],
+    summary="Generate a Chat Reply",
+    description=(
+        "Runs the selected Azure OpenAI model against the provided conversation history. "
+        "When enabled, the Azure web-search tool is exposed as `web_search_preview`."
+    ),
+    response_model=ChatResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid request."},
+        404: {"model": ErrorResponse, "description": "Unknown model ID."},
+        502: {"model": ErrorResponse, "description": "Model returned an unusable response."},
+        503: {"model": ErrorResponse, "description": "Model configuration is incomplete."},
+    },
+)
+async def chat(payload: ChatRequest, response: Response) -> Dict[str, Any]:
+    try:
+        result = await run_in_threadpool(
+            generate_chat_reply,
+            messages=[message.model_dump() for message in payload.messages],
+            model_id=payload.modelId,
+            use_web_search=payload.useWebSearch,
+        )
+    except ChatServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    response.headers["cache-control"] = CACHE_CONTROL_DEFAULT
+    return {
+        "model": {
+            **next(
+                (item for item in list_chat_models() if item["id"] == result["model"]["id"]),
+                {
+                    "id": result["model"]["id"],
+                    "label": result["model"]["label"],
+                    "deployment": result["model"]["deployment"],
+                    "available": True,
+                    "supportsWebSearch": True,
+                    "isDefault": False,
+                    "missingEnv": [],
+                },
+            ),
+            "deployment": result["model"]["deployment"],
+            "available": True,
+            "missingEnv": [],
+        },
+        "message": {
+            "role": "assistant",
+            "content": result["content"],
+        },
+        "citations": result["citations"],
+        "webSearchUsed": result["webSearchUsed"],
+        "responseId": result["responseId"],
     }
 
 

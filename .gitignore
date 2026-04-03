@@ -28,6 +28,7 @@
 
 # Backend generated data
 arnes-hackathon-backend/rnpd.preprocessed.json
+arnes-hackathon-backend/logs/
 
 #jupyter notebook
 **/.ipynb_checkpoints

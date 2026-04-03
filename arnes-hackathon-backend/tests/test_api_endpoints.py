@@ -60,6 +60,127 @@ def test_metrics_endpoint_returns_dataset_status_and_headers(client: TestClient)
     assert payload["datasetStatus"]["phase"] == "ready"
 
 
+def test_chat_models_endpoint_returns_backend_model_config(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        api_main,
+        "list_chat_models",
+        lambda: [
+            {
+                "id": "mdml-gpt5-001",
+                "label": "MDML-GPT5-001",
+                "deployment": "MDML-GPT5-001",
+                "available": True,
+                "supportsWebSearch": True,
+                "isDefault": True,
+                "missingEnv": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(api_main, "get_default_chat_model_id", lambda: "mdml-gpt5-001")
+
+    response = client.get("/api/chat/models")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["defaultModelId"] == "mdml-gpt5-001"
+    assert payload["items"][0]["label"] == "MDML-GPT5-001"
+    assert payload["items"][0]["supportsWebSearch"] is True
+
+
+def test_chat_usage_endpoint_returns_persisted_totals(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        api_main,
+        "get_chat_usage_summary",
+        lambda: {
+            "updatedAt": "2026-04-02T12:00:00+00:00",
+            "requestsTotal": 3,
+            "webSearchRequestsTotal": 2,
+            "usageTotals": {
+                "inputTokens": 120,
+                "outputTokens": 45,
+                "totalTokens": 165,
+                "reasoningTokens": 7,
+            },
+            "models": {
+                "mdml-gpt5-001": {
+                    "modelId": "mdml-gpt5-001",
+                    "label": "MDML-GPT5-001",
+                    "deployment": "MDML-GPT5-001",
+                    "requestsTotal": 2,
+                    "webSearchRequestsTotal": 1,
+                    "usageTotals": {
+                        "inputTokens": 80,
+                        "outputTokens": 30,
+                        "totalTokens": 110,
+                        "reasoningTokens": 4,
+                    },
+                    "lastUsedAt": "2026-04-02T12:00:00+00:00",
+                }
+            },
+        },
+    )
+
+    response = client.get("/api/chat/usage")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["requestsTotal"] == 3
+    assert payload["webSearchRequestsTotal"] == 2
+    assert payload["usageTotals"]["totalTokens"] == 165
+    assert payload["models"][0]["modelId"] == "mdml-gpt5-001"
+    assert payload["models"][0]["usageTotals"]["inputTokens"] == 80
+
+
+def test_chat_endpoint_returns_assistant_reply_and_citations(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        api_main,
+        "list_chat_models",
+        lambda: [
+            {
+                "id": "mdml-gpt5-001",
+                "label": "MDML-GPT5-001",
+                "deployment": "MDML-GPT5-001",
+                "available": True,
+                "supportsWebSearch": True,
+                "isDefault": True,
+                "missingEnv": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        api_main,
+        "generate_chat_reply",
+        lambda **kwargs: {
+            "model": {
+                "id": "mdml-gpt5-001",
+                "label": "MDML-GPT5-001",
+                "deployment": "MDML-GPT5-001",
+            },
+            "content": "Recent flooding was reported near the selected municipality.",
+            "citations": [{"title": "Flood report", "url": "https://example.com/flood"}],
+            "webSearchUsed": True,
+            "responseId": "resp_test_123",
+        },
+    )
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "Any recent flooding near Ptuj?"}],
+            "modelId": "mdml-gpt5-001",
+            "useWebSearch": True,
+        },
+    )
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["message"]["role"] == "assistant"
+    assert payload["message"]["content"].startswith("Recent flooding")
+    assert payload["citations"][0]["url"] == "https://example.com/flood"
+    assert payload["webSearchUsed"] is True
+    assert payload["responseId"] == "resp_test_123"
+
+
 def test_heritage_sites_invalid_bbox_returns_400(client: TestClient):
     response = client.get("/api/heritage-sites", params={"bbox": "invalid-bbox"})
     assert response.status_code == 400
