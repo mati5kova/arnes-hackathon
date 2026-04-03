@@ -44,7 +44,6 @@ class ModelSpec:
 MODEL_SPECS = (
     ModelSpec("mdml-gpt4-1-mini-001", "MDML-GPT4.1-Mini-001", "CHAT_MODEL_MDML_GPT4_1_MINI_001"),
     ModelSpec("mdml-gpt4o-mini-001", "MDML-GPT4o-Mini-001", "CHAT_MODEL_MDML_GPT4O_MINI_001"),
-    ModelSpec("mdml-gpt4o-002", "MDML-GPT4o-002", "CHAT_MODEL_MDML_GPT4O_002"),
     ModelSpec("mdml-gpt4o-001", "MDML-GPT4o-001", "CHAT_MODEL_MDML_GPT4O_001"),
     ModelSpec("mdml-gpt5-mini-001", "MDML-GPT5-Mini-001", "CHAT_MODEL_MDML_GPT5_MINI_001"),
     ModelSpec("mdml-gpt5-001", "MDML-GPT5-001", "CHAT_MODEL_MDML_GPT5_001"),
