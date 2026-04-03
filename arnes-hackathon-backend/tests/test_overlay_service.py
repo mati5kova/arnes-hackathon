@@ -262,6 +262,57 @@ def test_list_overlay_grid_area_mode_uses_grid_cells_when_enabled(monkeypatch):
     assert payload["gridCellSizeDeg"] == 0.1
 
 
+def test_list_overlay_grid_line_mode_uses_visible_lines(monkeypatch):
+    dataset = {
+        "loaded_at": 1762230400456.0,
+        "points_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "areas_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "area_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "line_source_by_kind": {
+            kind: (
+                {
+                    "path": "/tmp/rivers.shp",
+                    "records": [
+                        {
+                            "id": "river:1",
+                            "bounds": [14.0, 46.0, 14.2, 46.2],
+                            "contentOffset": 108,
+                            "contentLength": 64,
+                        }
+                    ],
+                }
+                if kind == "river"
+                else None
+            )
+            for kind in service.OVERLAY_DEFINITIONS
+        },
+        "line_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+    }
+
+    monkeypatch.setattr(service, "get_overlay_dataset", lambda refresh=False: dataset)
+    monkeypatch.setattr(
+        service,
+        "select_visible_lines",
+        lambda **kwargs: {
+            "lines": [
+                {
+                    "id": "river:1",
+                    "bounds": [14.0, 46.0, 14.2, 46.2],
+                    "paths": [[[14.0, 46.0], [14.2, 46.2]]],
+                }
+            ],
+            "in_view_count": 1,
+        },
+    )
+
+    payload = service.list_overlay_grid(kind="river", bbox=[13.9, 45.9, 14.3, 46.3], zoom=8)
+
+    assert payload["areas"] == []
+    assert payload["cells"] == []
+    assert payload["lines"][0]["id"] == "river:1"
+    assert payload["sampleCount"] == 1
+
+
 @pytest.mark.skipif(not service.HAS_RASTERIO, reason="rasterio is required for area-grid rasterization tests")
 def test_build_area_grid_cells_with_rasterio_returns_non_empty_cells():
     cells = service.build_area_grid_cells_with_rasterio(
@@ -293,6 +344,7 @@ def test_overlay_source_paths_exist():
         "OVERLAY_FLOOD_VERY_RARE_SHP": service.OVERLAY_FLOOD_VERY_RARE_SHP,
         "OVERLAY_LANDSLIDE_SHP": service.OVERLAY_LANDSLIDE_SHP,
         "OVERLAY_LANDSLIDE_DBF": service.OVERLAY_LANDSLIDE_DBF,
+        "OVERLAY_RIVER_LINE_SHP": service.OVERLAY_RIVER_LINE_SHP,
     }
 
     missing = [
@@ -315,6 +367,8 @@ def _empty_overlay_cache() -> dict:
         "points_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
         "areas_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
         "area_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "line_source_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "line_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
         "source_meta": {
             "hazard_file": service.OVERLAY_HAZARD_FILE,
             "air_file": service.OVERLAY_AIR_FILE,
@@ -324,6 +378,7 @@ def _empty_overlay_cache() -> dict:
             "flood_very_rare_shp": service.OVERLAY_FLOOD_VERY_RARE_SHP,
             "landslide_shp": service.OVERLAY_LANDSLIDE_SHP,
             "landslide_dbf": service.OVERLAY_LANDSLIDE_DBF,
+            "river_line_shp": service.OVERLAY_RIVER_LINE_SHP,
         },
     }
 

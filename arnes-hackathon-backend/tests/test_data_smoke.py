@@ -24,3 +24,4 @@ def test_real_overlay_dataset_loads_all_core_hazard_layers():
     assert len(dataset["areas_by_kind"]["fire"]) > 0
     assert len(dataset["areas_by_kind"]["flood"]) > 0
     assert len(dataset["areas_by_kind"]["landslide"]) > 0
+    assert len(dataset["line_source_by_kind"]["river"]["records"]) > 0

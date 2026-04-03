@@ -34,6 +34,12 @@ describe("url-state reload behavior", () => {
 		expect(parsed.overlay).toBe("flood");
 	});
 
+	it("parses river overlay from URL state", async () => {
+		const module = await import("./url-state");
+		const parsed = module.parseMapUrlState(new URLSearchParams("overlay=river"));
+		expect(parsed.overlay).toBe("river");
+	});
+
 	it("ignores invalid overlay in URL state", async () => {
 		const module = await import("./url-state");
 		const parsed = module.parseMapUrlState(new URLSearchParams("overlay=unknown"));

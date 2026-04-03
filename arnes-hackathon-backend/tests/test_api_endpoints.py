@@ -206,6 +206,7 @@ def test_heritage_sites_supports_etag_and_304(client: TestClient, monkeypatch: p
                 "protectionStatus": None,
                 "municipality": "TEST",
                 "description": None,
+                "elevationM": 337.41,
                 "isCluster": False,
                 "clusterCount": None,
             }
@@ -241,6 +242,7 @@ def test_heritage_site_detail_supports_etag_and_304(client: TestClient, monkeypa
         "protectionStatus": "protected",
         "municipality": "TEST",
         "description": "Detailed description",
+        "elevationM": 337.41,
         "isCluster": False,
         "clusterCount": None,
         "detailFields": [{"label": "Datacija", "value": "19. stol."}],

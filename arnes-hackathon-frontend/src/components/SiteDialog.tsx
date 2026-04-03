@@ -51,6 +51,12 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 								<dd>{site.protectionStatus}</dd>
 							</div>
 						)}
+						{typeof site.elevationM === "number" && (
+							<div>
+								<dt className="font-medium text-foreground">{m.siteDialog.elevation}</dt>
+								<dd>{site.elevationM.toFixed(2)} m</dd>
+							</div>
+						)}
 						<div className="md:col-span-2">
 							<dt className="font-medium text-foreground">{m.siteDialog.coordinates}</dt>
 							<dd>

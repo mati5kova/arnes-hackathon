@@ -1,21 +1,35 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
+import geopandas as gpd
+import numpy as np
+from shapely.geometry import Point
+from shapely.strtree import STRtree
 
 BASE_DIR = Path(__file__).resolve().parent
-INPUT_PATH = BASE_DIR / "kd_z_nevarnost.geojson"
-OUTPUT_PATH = BASE_DIR / "kd_z_nevarnost_verified.geojson"
+INPUT_PATH = BASE_DIR / "Data" / "kd_visine.geojson"
+OUTPUT_PATH = BASE_DIR / "Data" / "kd_z_nevarnost_enriched_verified.geojson"
+FLOOD_FREQUENT_PATH = BASE_DIR / "Data_Processing" / "DRSV_OPKP_POGOSTE_POPL" / "DRSV_OPKP_POGOSTE_POPL.shp"
+FLOOD_RARE_PATH = BASE_DIR / "Data_Processing" / "DRSV_OPKP_REDKE_POPL" / "DRSV_OPKP_REDKE_POPL.shp"
+FLOOD_VERY_RARE_PATH = BASE_DIR / "Data_Processing" / "DRSV_OPKP_ZR_POPL" / "DRSV_OPKP_ZR_POPL.shp"
+RIVER_PATH = BASE_DIR / "Data_Processing" / "DRSV_HIDRO5_LIN_PV" / "HIDRO5_LIN_PV_TIPTV1_2.shp"
+METRIC_CRS = "EPSG:3794"
+FLOOD_MODEL_VERSION = "drsv-flood-river-terrain-v2"
 
 GENERAL_SOURCE_STRINGS = [
-    "RNPD description and location fields",
-    "ARSO potresna nevarnost (2021)",
-    "DRSV flood warning maps / Predhodna ocena 2024",
-    "GeoZS landslide warning map 1:25k",
-    "ARSO/URSZR fire warning context",
+    "RNPD register metadata and descriptive fields",
+    "DRSV official flood warning maps (frequent, rare, very rare)",
+    "DRSV HIDRO5_LIN_PV official hydrography network",
+    "Site elevation from kd_visine.geojson",
+    "Terrain context estimated from nearest-river Z and official flood polygons (no DEM raster in repository)",
+    "ARSO potresna nevarnost (2021), GeoZS landslide map 1:25k, ARSO/URSZR fire context",
 ]
 
 FIELD_MAP = {
@@ -24,6 +38,45 @@ FIELD_MAP = {
     "earthquake_danger_revised": "potres",
     "landslide_danger_revised": "plazovi",
 }
+
+SITE_LEVEL_FEATURES = (
+    "inside_frequent_flood_zone",
+    "inside_rare_flood_zone",
+    "inside_very_rare_flood_zone",
+    "distance_to_river_m",
+    "distance_to_flood_zone_m",
+    "elevation_m",
+    "nearest_river_elevation_m",
+    "relative_height_above_nearest_river_m",
+    "local_slope_deg",
+    "terrain_position",
+)
+
+
+@dataclass(slots=True)
+class FloodContext:
+    inside_frequent_flood_zone: bool
+    inside_rare_flood_zone: bool
+    inside_very_rare_flood_zone: bool
+    distance_to_river_m: float | None
+    distance_to_flood_zone_m: float | None
+    elevation_m: float | None
+    nearest_river_elevation_m: float | None
+    relative_height_above_nearest_river_m: float | None
+    local_slope_deg: float | None
+    terrain_position: str
+    nearest_river_name: str | None
+    nearest_river_type: str | None
+    nearest_river_flow_regime: str | None
+    nearest_river_kind: str | None
+    river_distance_band: str
+    flood_zone_distance_band: str
+    terrain_context_confidence: float
+    terrain_context_method: str
+    flood_official_score: float
+    flood_proximity_score: float
+    flood_hazard_band: str
+    flood_reasoning: str
 
 
 def normalize(value: object) -> str:
@@ -142,14 +195,65 @@ def clamp(value: float, lower: float, upper: float) -> float:
     return min(max(value, lower), upper)
 
 
-def rounded(value: float) -> float:
+def rounded_score(value: float) -> float:
     return round(float(value) + 1e-9, 1)
+
+
+def rounded_metric(value: float | None) -> float | None:
+    if value is None or not math.isfinite(value):
+        return None
+    return round(float(value) + 1e-9, 1)
+
+
+def rounded_confidence(value: float) -> float:
+    return round(float(value) + 1e-9, 2)
 
 
 def limit_delta(value: float, original: float) -> float:
     value = clamp(value, original - 1.0, original + 1.0)
-    value = clamp(value, 0.0, 5.0)
-    return rounded(value)
+    value = clamp(value, 0.0, 4.0)
+    return rounded_score(value)
+
+
+def clamp_score(value: float) -> float:
+    return rounded_score(clamp(value, 0.0, 4.0))
+
+
+def safe_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if math.isfinite(number):
+        return number
+    return None
+
+
+def percentile_band(value: float | None, thresholds: list[tuple[float, str]], default: str) -> str:
+    if value is None:
+        return default
+    for upper, label in thresholds:
+        if value <= upper:
+            return label
+    return thresholds[-1][1] if thresholds else default
+
+
+def piecewise_linear(value: float | None, points: list[tuple[float, float]], *, default: float = 0.0) -> float:
+    if value is None or not points:
+        return default
+    if value <= points[0][0]:
+        return points[0][1]
+    for left, right in zip(points, points[1:]):
+        x1, y1 = left
+        x2, y2 = right
+        if value <= x2:
+            if x2 == x1:
+                return y2
+            ratio = (value - x1) / (x2 - x1)
+            return y1 + ratio * (y2 - y1)
+    return points[-1][1]
 
 
 def material_from_properties(props: dict[str, object]) -> tuple[str, float, str]:
@@ -239,35 +343,6 @@ def infer_fire(props: dict[str, object], material: str, text: str) -> tuple[floa
     return limit_delta(original + adjustment, original), cues
 
 
-def infer_flood(props: dict[str, object], text: str) -> tuple[float, list[str]]:
-    original = float(props.get("poplave") or 0.0)
-    adjustment = 0.0
-    cues: list[str] = []
-
-    strong_river = has(RIVER_RE, text)
-    flood_words = has(FLOOD_RE, text)
-    high_ground = has(HIGH_GROUND_RE, text)
-
-    if strong_river or flood_words:
-        if original <= 1.0:
-            adjustment += 0.2
-        elif original <= 2.0:
-            adjustment += 0.1
-        cues.append("river/valley or floodplain siting")
-    if has(STRONG_FLOOD_RE, text) or ("otok" in text and strong_river):
-        adjustment += 0.2 if original <= 1.0 else 0.1
-        cues.append("explicit floodplain/island wording")
-    if "otok" in text or "barj" in text or "jezer" in text or "ravnic" in text:
-        adjustment += 0.1
-        if "floodplain siting" not in cues:
-            cues.append("low-lying siting")
-    if high_ground and not strong_river and original >= 1.0:
-        adjustment -= 0.1
-        cues.append("ridge/high-ground wording")
-
-    return limit_delta(original + adjustment, original), cues
-
-
 def infer_earthquake(props: dict[str, object], material: str, text: str) -> tuple[float, list[str]]:
     original = float(props.get("potres") or 0.0)
     score = 0.2
@@ -311,14 +386,14 @@ def infer_earthquake(props: dict[str, object], material: str, text: str) -> tupl
     return limit_delta(score, original), cues
 
 
-def infer_landslide(props: dict[str, object], text: str) -> tuple[float, list[str]]:
+def infer_landslide(props: dict[str, object], text: str, flood_context: FloodContext) -> tuple[float, list[str]]:
     original = float(props.get("plazovi") or 0.0)
     adjustment = 0.0
     cues: list[str] = []
 
     steep = has(SLOPE_RE, text)
     very_steep = "grapa" in text or "strm" in text or "pod robom" in text or "klif" in text or "sedl" in text
-    flat = "barj" in text or "ravnic" in text or "terasi" in text or "polju" in text or "otoku" in text
+    flat_terrain = flood_context.terrain_position in {"active_floodplain", "floodplain", "valley_floor", "low_terrace"}
 
     if has(LANDSLIDE_RE, text):
         adjustment += 0.4 if original <= 2.0 else 0.2
@@ -330,14 +405,303 @@ def infer_landslide(props: dict[str, object], text: str) -> tuple[float, list[st
         adjustment += 0.1
         if "slope-edge siting" not in cues:
             cues.append("steep terrain wording")
-    if flat and original >= 1.0:
+    if flood_context.local_slope_deg is not None and flood_context.local_slope_deg >= 12.0:
+        adjustment += 0.1
+        cues.append("river-side terrain appears steep")
+    if flat_terrain and original >= 1.0:
         adjustment -= 0.1
-        cues.append("terrace/plain wording")
+        cues.append("river plain/terrace context")
 
     return limit_delta(original + adjustment, original), cues
 
 
-def verification_status(props: dict[str, object], material_confidence: float, reason_hint: str) -> tuple[str, float]:
+def classify_distance_band(distance_m: float | None, *, river: bool) -> str:
+    if river:
+        return percentile_band(
+            distance_m,
+            [
+                (25.0, "adjacent"),
+                (100.0, "near"),
+                (250.0, "close"),
+                (500.0, "intermediate"),
+                (1000.0, "far"),
+                (2500.0, "remote"),
+            ],
+            "unknown",
+        )
+    return percentile_band(
+        distance_m,
+        [
+            (0.0, "inside"),
+            (25.0, "touching"),
+            (100.0, "very_near"),
+            (250.0, "near"),
+            (500.0, "moderate"),
+            (1000.0, "far"),
+        ],
+        "unknown",
+    )
+
+
+def classify_terrain_position(
+    *,
+    inside_frequent: bool,
+    inside_rare: bool,
+    inside_very_rare: bool,
+    distance_to_river_m: float | None,
+    relative_height_above_river_m: float | None,
+    local_slope_deg: float | None,
+    text: str,
+) -> str:
+    if inside_frequent:
+        return "active_floodplain"
+    if inside_rare or inside_very_rare:
+        return "floodplain"
+
+    dist = distance_to_river_m if distance_to_river_m is not None else 999999.0
+    rel = relative_height_above_river_m if relative_height_above_river_m is not None else 999999.0
+    slope = local_slope_deg if local_slope_deg is not None else 0.0
+
+    if dist <= 150.0 and rel <= 3.0:
+        return "valley_floor"
+    if dist <= 300.0 and rel <= 10.0:
+        return "low_terrace"
+    if dist <= 600.0 and rel <= 25.0:
+        return "elevated_terrace"
+    if rel >= 60.0 or (rel >= 35.0 and slope >= 8.0) or (has(HIGH_GROUND_RE, text) and rel >= 20.0):
+        return "ridge_or_high_ground"
+    if dist <= 1200.0 and rel >= 20.0 and slope >= 4.0:
+        return "valley_side"
+    if dist > 1200.0 and rel >= 20.0:
+        return "upland"
+    return "gentle_hillside"
+
+
+def terrain_confidence(
+    *,
+    elevation_m: float | None,
+    nearest_river_elevation_m: float | None,
+    nearest_river_name: str | None,
+    nearest_river_kind: str | None,
+) -> float:
+    confidence = 0.55
+    if elevation_m is not None:
+        confidence += 0.1
+    if nearest_river_elevation_m is not None:
+        confidence += 0.15
+    if nearest_river_kind == "vodotok":
+        confidence += 0.05
+    if nearest_river_name:
+        confidence += 0.02
+    return rounded_confidence(clamp(confidence, 0.45, 0.9))
+
+
+def official_flood_score(*, inside_frequent: bool, inside_rare: bool, inside_very_rare: bool) -> float:
+    if inside_frequent:
+        return 4.0
+    if inside_rare:
+        return 3.2
+    if inside_very_rare:
+        return 2.4
+    return 0.0
+
+
+def flood_proximity_score(
+    *,
+    distance_to_river_m: float | None,
+    relative_height_above_river_m: float | None,
+    local_slope_deg: float | None,
+    distance_to_flood_zone_m: float | None,
+    nearest_river_kind: str | None,
+) -> float:
+    distance_factor = piecewise_linear(
+        distance_to_river_m,
+        [
+            (0.0, 1.0),
+            (25.0, 0.98),
+            (50.0, 0.95),
+            (100.0, 0.85),
+            (200.0, 0.7),
+            (350.0, 0.55),
+            (500.0, 0.42),
+            (750.0, 0.28),
+            (1000.0, 0.18),
+            (1500.0, 0.1),
+            (2500.0, 0.0),
+        ],
+    )
+    relative_height_factor = piecewise_linear(
+        relative_height_above_river_m,
+        [
+            (-10.0, 1.25),
+            (0.0, 1.18),
+            (2.0, 1.08),
+            (5.0, 1.0),
+            (10.0, 0.82),
+            (20.0, 0.55),
+            (35.0, 0.3),
+            (50.0, 0.15),
+            (75.0, 0.06),
+            (100.0, 0.03),
+        ],
+    )
+    flood_zone_bonus = piecewise_linear(
+        distance_to_flood_zone_m,
+        [
+            (0.0, 1.0),
+            (25.0, 0.8),
+            (50.0, 0.65),
+            (100.0, 0.45),
+            (200.0, 0.25),
+            (400.0, 0.1),
+            (800.0, 0.0),
+        ],
+    )
+
+    slope_bonus = 0.0
+    if local_slope_deg is not None:
+        if local_slope_deg < 1.5:
+            slope_bonus = 0.35
+        elif local_slope_deg < 3.0:
+            slope_bonus = 0.25
+        elif local_slope_deg < 6.0:
+            slope_bonus = 0.1
+        elif local_slope_deg >= 15.0:
+            slope_bonus = -0.3
+        elif local_slope_deg >= 10.0:
+            slope_bonus = -0.15
+
+    base = 2.6 * distance_factor * relative_height_factor
+    score = base + flood_zone_bonus + slope_bonus
+    if nearest_river_kind == "razbremenilni kanal":
+        score *= 0.95
+    return clamp(score, 0.0, 3.4)
+
+
+def outside_polygon_flood_score(flood_context: FloodContext) -> float:
+    score = flood_context.flood_proximity_score
+    river_distance = flood_context.distance_to_river_m
+    flood_distance = flood_context.distance_to_flood_zone_m
+    relative_height = flood_context.relative_height_above_nearest_river_m
+    local_slope = flood_context.local_slope_deg
+    terrain = flood_context.terrain_position
+
+    dist = river_distance if river_distance is not None else 999999.0
+    flood_dist = flood_distance if flood_distance is not None else 999999.0
+    rel = relative_height if relative_height is not None else 999999.0
+    slope = local_slope if local_slope is not None else 0.0
+
+    # Elevated terrain should only retain meaningful flood risk when it is also very near an official flood-zone edge.
+    if terrain in {"ridge_or_high_ground", "upland"} or rel >= 30.0:
+        score = min(score, 1.2 if flood_dist <= 100.0 else 0.8)
+    elif terrain == "valley_side" or rel >= 20.0 or slope >= 8.0:
+        score = min(score, 1.7 if flood_dist <= 50.0 else 1.1)
+    elif terrain == "elevated_terrace" or rel >= 10.0:
+        score = min(score, 2.1 if flood_dist <= 25.0 else 1.5)
+
+    if flood_dist <= 10.0 and rel <= 5.0:
+        score = max(score, 2.8 if dist <= 300.0 else 2.5)
+    elif flood_dist <= 25.0 and rel <= 5.0:
+        score = max(score, 2.5 if dist <= 500.0 else 2.3)
+    elif flood_dist <= 100.0 and rel <= 10.0:
+        score = max(score, 1.9 if terrain in {"valley_floor", "low_terrace", "floodplain"} else 1.6)
+    elif dist <= 50.0 and rel <= 2.0 and slope < 3.0:
+        score = max(score, 2.3)
+    elif dist <= 100.0 and rel <= 5.0 and slope < 5.0:
+        score = max(score, 1.9)
+    elif dist <= 200.0 and rel <= 10.0 and terrain in {"valley_floor", "low_terrace"}:
+        score = max(score, 1.5)
+    else:
+        if terrain in {"ridge_or_high_ground", "upland"}:
+            score = min(score, 0.8)
+        elif dist > 500.0 and flood_dist > 100.0:
+            score = min(score, 0.8)
+        elif dist > 200.0 and rel > 10.0:
+            score = min(score, 1.2)
+
+    return clamp(score, 0.0, 3.0)
+
+
+def classify_flood_hazard_band(score: float) -> str:
+    if score >= 3.5:
+        return "very_high"
+    if score >= 2.5:
+        return "high"
+    if score >= 1.5:
+        return "moderate"
+    if score >= 0.75:
+        return "low"
+    return "very_low"
+
+
+def infer_flood(props: dict[str, object], text: str, flood_context: FloodContext) -> tuple[float, list[str], str]:
+    official = flood_context.flood_official_score
+    proximity = flood_context.flood_proximity_score
+
+    if flood_context.inside_frequent_flood_zone:
+        score = 4.0
+        cues = ["site intersects the frequent official flood polygon"]
+    elif flood_context.inside_rare_flood_zone:
+        score = max(3.2, min(3.8, 2.9 + 0.25 * proximity))
+        cues = ["site intersects the rare official flood polygon"]
+    elif flood_context.inside_very_rare_flood_zone:
+        score = max(2.4, min(3.4, 1.9 + 0.4 * proximity))
+        cues = ["site intersects the very-rare official flood polygon"]
+    else:
+        score = outside_polygon_flood_score(flood_context)
+        cues = ["outside official polygons, flood score derived conservatively from river distance, flood-zone distance, and relative height above the nearest river"]
+
+    if has(STRONG_FLOOD_RE, text) and flood_context.distance_to_river_m is not None and flood_context.distance_to_river_m <= 500.0:
+        score += 0.1
+        cues.append("register wording independently mentions floodplain or island context")
+    if has(HIGH_GROUND_RE, text) and (flood_context.relative_height_above_nearest_river_m or 0.0) >= 20.0:
+        score -= 0.1
+        cues.append("register wording confirms elevated terrain")
+
+    score = clamp_score(score)
+    band = classify_flood_hazard_band(score)
+    reasoning = build_flood_reasoning(flood_context=flood_context, score=score, band=band)
+    return score, cues, reasoning
+
+
+def build_flood_reasoning(*, flood_context: FloodContext, score: float, band: str) -> str:
+    river_name = flood_context.nearest_river_name or "the nearest mapped watercourse"
+    river_distance = "unknown" if flood_context.distance_to_river_m is None else f"{flood_context.distance_to_river_m:.1f} m"
+    flood_distance = "unknown" if flood_context.distance_to_flood_zone_m is None else f"{flood_context.distance_to_flood_zone_m:.1f} m"
+    rel_height = (
+        "unknown"
+        if flood_context.relative_height_above_nearest_river_m is None
+        else f"{flood_context.relative_height_above_nearest_river_m:.1f} m"
+    )
+
+    if flood_context.inside_frequent_flood_zone:
+        return (
+            f"Inside the official frequent-flood polygon; nearest river context is {river_name} at {river_distance}, "
+            f"with the site {rel_height} above the sampled river level. Final flood band: {band}."
+        )
+    if flood_context.inside_rare_flood_zone:
+        return (
+            f"Inside the official rare-flood polygon; nearest river context is {river_name} at {river_distance}, "
+            f"and the site stands {rel_height} above the sampled river level. Final flood band: {band}."
+        )
+    if flood_context.inside_very_rare_flood_zone:
+        return (
+            f"Inside the official very-rare-flood polygon; nearest river context is {river_name} at {river_distance}, "
+            f"and the site stands {rel_height} above the sampled river level. Final flood band: {band}."
+        )
+    return (
+        f"Outside the official flood polygons; nearest river context is {river_name} at {river_distance}, nearest mapped flood zone is {flood_distance}, "
+        f"the site stands {rel_height} above the sampled river level, and the terrain is classified as {flood_context.terrain_position}. "
+        f"Final flood band: {band}."
+    )
+
+
+def verification_status(
+    props: dict[str, object],
+    material_confidence: float,
+    reason_hint: str,
+    flood_context: FloodContext,
+) -> tuple[str, float]:
     official_source_count = 0
     if props.get("QR") or props.get("POVEZAVA1"):
         official_source_count += 1
@@ -346,14 +710,16 @@ def verification_status(props: dict[str, object], material_confidence: float, re
     if props.get("PHOTOURL"):
         official_source_count += 1
 
-    research_conf = 0.28 + 0.1 * official_source_count + 0.35 * material_confidence
+    research_conf = 0.34 + 0.08 * official_source_count + 0.22 * material_confidence + 0.28 * flood_context.terrain_context_confidence
+    if flood_context.inside_frequent_flood_zone or flood_context.inside_rare_flood_zone or flood_context.inside_very_rare_flood_zone:
+        research_conf += 0.05
     if "explicit" in reason_hint or "documented" in reason_hint:
-        research_conf += 0.06
-    research_conf = rounded(clamp(research_conf, 0.3, 0.92))
+        research_conf += 0.03
+    research_conf = rounded_confidence(clamp(research_conf, 0.4, 0.96))
 
-    if official_source_count >= 2 and material_confidence >= 0.7:
+    if official_source_count >= 2 and material_confidence >= 0.7 and flood_context.terrain_context_confidence >= 0.72:
         return "verified", research_conf
-    if official_source_count >= 1 and material_confidence >= 0.48:
+    if official_source_count >= 1 and flood_context.terrain_context_confidence >= 0.62:
         return "partially_verified", research_conf
     return "weakly_verified", research_conf
 
@@ -365,8 +731,6 @@ def build_sources(props: dict[str, object]) -> list[str]:
     elif props.get("POVEZAVA1"):
         sources.append(str(props["POVEZAVA1"]))
     sources.extend(GENERAL_SOURCE_STRINGS)
-    if props.get("PREDPISHTTP") and len(sources) < 6:
-        sources.insert(1, "eVRD legal regime entry")
     return sources[:6]
 
 
@@ -381,6 +745,7 @@ def reasoning_sentence(
     flood_cues: list[str],
     quake_cues: list[str],
     slide_cues: list[str],
+    flood_context: FloodContext,
 ) -> str:
     original = {
         "fire": float(props.get("pozar") or 0.0),
@@ -392,49 +757,277 @@ def reasoning_sentence(
     if abs(fire - original["fire"]) >= 0.2:
         revisions.append("fire nudged for " + (fire_cues[0] if fire_cues else "material"))
     if abs(flood - original["flood"]) >= 0.2:
-        revisions.append("flood nudged for " + (flood_cues[0] if flood_cues else "siting"))
+        revisions.append("flood re-modeled from official polygons, river distance, and relative terrain")
     if abs(quake - original["earthquake"]) >= 0.2:
         revisions.append("earthquake set modestly above zero for " + (quake_cues[0] if quake_cues else "structural vulnerability"))
     if abs(slide - original["landslide"]) >= 0.2:
         revisions.append("landslide nudged for " + (slide_cues[0] if slide_cues else "terrain"))
 
-    cue_pool = fire_cues + flood_cues + quake_cues + slide_cues
+    flood_fragment = (
+        f"nearest-river distance {flood_context.distance_to_river_m:.1f} m, relative height {flood_context.relative_height_above_nearest_river_m:.1f} m"
+        if flood_context.distance_to_river_m is not None and flood_context.relative_height_above_nearest_river_m is not None
+        else "river-relative terrain estimated from official hydrography"
+    )
+
     if revisions:
-        return f"Official register record supports {material}; {'; '.join(revisions[:2])}; remaining scores stay close to baseline."
-    if cue_pool:
-        return f"Official register record supports {material}; {cue_pool[0]} is consistent with the baseline, so scores remain near the original."
-    return f"Official register record supports {material}; no stronger object-specific evidence than the baseline was found, so revised scores stay near the original."
+        return f"Official register record supports {material}; {'; '.join(revisions[:3])}; flood context uses {flood_fragment}."
+    return f"Official register record supports {material}; revised scores stay near the baseline, while flood context uses {flood_fragment}."
 
 
-def verification_notes(material_reason: str, status: str) -> str:
+def verification_notes(material_reason: str, status: str, flood_context: FloodContext) -> str:
     material_reason = material_reason[0].lower() + material_reason[1:] if material_reason else "is inferred"
     if material_reason.startswith("material "):
         material_reason = material_reason[len("material "):]
+    terrain_note = f"terrain position {flood_context.terrain_position}, confidence {flood_context.terrain_context_confidence:.2f}"
     if status == "verified":
-        return f"Identity anchored by RNPD/eVRD-style official links; material basis: {material_reason}; hazard review is conservative and site-specific where wording allows."
+        return f"Identity anchored by official register links; material basis: {material_reason}; flood context uses official polygons and hydrography with {terrain_note}."
     if status == "partially_verified":
-        return f"Identity anchored by official register metadata; material basis: {material_reason}; hazard review mixes baseline confirmation with limited inference."
-    return f"Identity likely from official register metadata; material mostly inferred because the description is broad; hazard review stays conservative."
+        return f"Identity anchored by official register metadata; material basis: {material_reason}; flood context uses official polygons and hydrography with {terrain_note}."
+    return f"Identity likely from official register metadata; material mostly inferred because the description is broad; flood context still uses official polygons and hydrography with {terrain_note}."
 
 
-def enrich_feature(feature: dict[str, object]) -> dict[str, object]:
+def build_boolean_flags(points: np.ndarray, polygons: np.ndarray) -> np.ndarray:
+    flags = np.zeros(len(points), dtype=bool)
+    if len(points) == 0 or len(polygons) == 0:
+        return flags
+    tree = STRtree(polygons)
+    pairs = tree.query(points, predicate="intersects")
+    if len(pairs) == 0:
+        return flags
+    flags[np.unique(pairs[0])] = True
+    return flags
+
+
+def nearest_indexes_and_distances(points: np.ndarray, geometries: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    indexes = np.full(len(points), -1, dtype=int)
+    distances = np.full(len(points), np.nan, dtype=float)
+    if len(points) == 0 or len(geometries) == 0:
+        return indexes, distances
+    tree = STRtree(geometries)
+    pairs, dists = tree.query_nearest(points, all_matches=False, return_distance=True)
+    if len(pairs) == 0:
+        return indexes, distances
+    indexes[pairs[0]] = pairs[1]
+    distances[pairs[0]] = dists
+    return indexes, distances
+
+
+def load_flood_polygons(path: Path) -> gpd.GeoDataFrame:
+    gdf = gpd.read_file(path, columns=[])
+    gdf = gdf.to_crs(METRIC_CRS)
+    gdf = gdf.loc[gdf.geometry.notna() & ~gdf.geometry.is_empty, ["geometry"]].reset_index(drop=True)
+    return gdf
+
+
+def load_rivers() -> gpd.GeoDataFrame:
+    rivers = gpd.read_file(
+        RIVER_PATH,
+        columns=["IME", "VRSTA_IME", "TIPTV_IM", "STALN_IM", "OS_IME", "POTEK_IM"],
+    )
+    rivers = rivers.to_crs(METRIC_CRS)
+    rivers = rivers.loc[rivers.geometry.notna() & ~rivers.geometry.is_empty].copy()
+    rivers = rivers.loc[
+        (rivers["VRSTA_IME"] == "tekoča voda")
+        & (rivers["POTEK_IM"] == "da - potek je znan")
+        & (rivers["OS_IME"] == "dejanska")
+    ].reset_index(drop=True)
+    return rivers[["IME", "VRSTA_IME", "TIPTV_IM", "STALN_IM", "geometry"]]
+
+
+def clean_river_name(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text or text.startswith("0000 "):
+        return None
+    if text.startswith("0000 ("):
+        return None
+    return text
+
+
+def nearest_river_elevation(point: Point, geometry: Any) -> float | None:
+    try:
+        nearest_point = geometry.interpolate(geometry.project(point))
+    except Exception:
+        return None
+    if not getattr(nearest_point, "has_z", False):
+        return None
+    z_value = getattr(nearest_point, "z", None)
+    return float(z_value) if z_value is not None and math.isfinite(float(z_value)) else None
+
+
+def compute_geospatial_contexts(features: list[dict[str, Any]]) -> list[FloodContext]:
+    sites_wgs84 = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+    sites_metric = sites_wgs84.to_crs(METRIC_CRS)
+    site_points = np.asarray(sites_metric.geometry.values, dtype=object)
+
+    frequent = load_flood_polygons(FLOOD_FREQUENT_PATH)
+    rare = load_flood_polygons(FLOOD_RARE_PATH)
+    very_rare = load_flood_polygons(FLOOD_VERY_RARE_PATH)
+    all_flood = gpd.GeoDataFrame(
+        geometry=gpd.GeoSeries(
+            pd_concat_geometries([frequent.geometry, rare.geometry, very_rare.geometry]),
+            crs=METRIC_CRS,
+        )
+    )
+
+    frequent_flags = build_boolean_flags(site_points, np.asarray(frequent.geometry.values, dtype=object))
+    rare_flags = build_boolean_flags(site_points, np.asarray(rare.geometry.values, dtype=object))
+    very_rare_flags = build_boolean_flags(site_points, np.asarray(very_rare.geometry.values, dtype=object))
+
+    _, flood_distances = nearest_indexes_and_distances(site_points, np.asarray(all_flood.geometry.values, dtype=object))
+
+    rivers = load_rivers()
+    river_geometries = np.asarray(rivers.geometry.values, dtype=object)
+    river_indexes, river_distances = nearest_indexes_and_distances(site_points, river_geometries)
+
+    contexts: list[FloodContext] = []
+    for idx, feature in enumerate(features):
+        props = feature.get("properties", {})
+        text = normalize(" ".join(str(props.get(k) or "") for k in ("LOKACIJAOPIS", "OPIS", "IME", "GESLA")))
+        point = sites_metric.geometry.iloc[idx]
+        elevation_m = safe_float(props.get("z"))
+
+        nearest_idx = int(river_indexes[idx])
+        river_distance_m = float(river_distances[idx]) if math.isfinite(float(river_distances[idx])) else None
+        nearest_river_name = None
+        nearest_river_type = None
+        nearest_river_flow_regime = None
+        nearest_river_kind = None
+        river_elevation_m = None
+
+        if nearest_idx >= 0:
+            nearest_row = rivers.iloc[nearest_idx]
+            nearest_river_name = clean_river_name(nearest_row.get("IME"))
+            nearest_river_type = str(nearest_row.get("VRSTA_IME") or "").strip() or None
+            nearest_river_kind = str(nearest_row.get("TIPTV_IM") or "").strip() or None
+            nearest_river_flow_regime = str(nearest_row.get("STALN_IM") or "").strip() or None
+            river_elevation_m = nearest_river_elevation(point, nearest_row.geometry)
+
+        relative_height_m = None
+        if elevation_m is not None and river_elevation_m is not None:
+            relative_height_m = elevation_m - river_elevation_m
+
+        local_slope_deg = None
+        if relative_height_m is not None and river_distance_m is not None:
+            local_slope_deg = math.degrees(math.atan(abs(relative_height_m) / max(river_distance_m, 5.0)))
+
+        inside_frequent = bool(frequent_flags[idx])
+        inside_rare = bool(rare_flags[idx])
+        inside_very_rare = bool(very_rare_flags[idx])
+        distance_to_flood_zone_m = float(flood_distances[idx]) if math.isfinite(float(flood_distances[idx])) else None
+
+        terrain_position = classify_terrain_position(
+            inside_frequent=inside_frequent,
+            inside_rare=inside_rare,
+            inside_very_rare=inside_very_rare,
+            distance_to_river_m=river_distance_m,
+            relative_height_above_river_m=relative_height_m,
+            local_slope_deg=local_slope_deg,
+            text=text,
+        )
+        terrain_context_conf = terrain_confidence(
+            elevation_m=elevation_m,
+            nearest_river_elevation_m=river_elevation_m,
+            nearest_river_name=nearest_river_name,
+            nearest_river_kind=nearest_river_kind,
+        )
+        official_score = official_flood_score(
+            inside_frequent=inside_frequent,
+            inside_rare=inside_rare,
+            inside_very_rare=inside_very_rare,
+        )
+        proximity_score = flood_proximity_score(
+            distance_to_river_m=river_distance_m,
+            relative_height_above_river_m=relative_height_m,
+            local_slope_deg=local_slope_deg,
+            distance_to_flood_zone_m=distance_to_flood_zone_m,
+            nearest_river_kind=nearest_river_kind,
+        )
+
+        placeholder_context = FloodContext(
+            inside_frequent_flood_zone=inside_frequent,
+            inside_rare_flood_zone=inside_rare,
+            inside_very_rare_flood_zone=inside_very_rare,
+            distance_to_river_m=rounded_metric(river_distance_m),
+            distance_to_flood_zone_m=rounded_metric(distance_to_flood_zone_m),
+            elevation_m=rounded_metric(elevation_m),
+            nearest_river_elevation_m=rounded_metric(river_elevation_m),
+            relative_height_above_nearest_river_m=rounded_metric(relative_height_m),
+            local_slope_deg=rounded_metric(local_slope_deg),
+            terrain_position=terrain_position,
+            nearest_river_name=nearest_river_name,
+            nearest_river_type=nearest_river_type,
+            nearest_river_flow_regime=nearest_river_flow_regime,
+            nearest_river_kind=nearest_river_kind,
+            river_distance_band=classify_distance_band(river_distance_m, river=True),
+            flood_zone_distance_band=classify_distance_band(distance_to_flood_zone_m, river=False),
+            terrain_context_confidence=terrain_context_conf,
+            terrain_context_method="estimated from official flood polygons, nearest river geometry, river Z, and site elevation; no DEM raster available",
+            flood_official_score=official_score,
+            flood_proximity_score=rounded_score(proximity_score),
+            flood_hazard_band="unknown",
+            flood_reasoning="",
+        )
+        contexts.append(placeholder_context)
+
+    return contexts
+
+
+def pd_concat_geometries(geometry_sets: list[Any]) -> list[Any]:
+    merged: list[Any] = []
+    for geometry_set in geometry_sets:
+        merged.extend(list(geometry_set))
+    return merged
+
+
+def enrich_feature(feature: dict[str, Any], flood_context: FloodContext) -> dict[str, Any]:
     props = feature["properties"]
-    text = normalize(" ".join(str(props.get(k) or "") for k in ("IME", "GESLA", "OPIS", "LOKACIJAOPIS", "TIP", "ZVRST", "DATACIJA", "regija")))
+    text = normalize(
+        " ".join(str(props.get(k) or "") for k in ("IME", "GESLA", "OPIS", "LOKACIJAOPIS", "TIP", "ZVRST", "DATACIJA", "regija"))
+    )
 
     material, material_conf, material_reason = material_from_properties(props)
     fire, fire_cues = infer_fire(props, material, text)
-    flood, flood_cues = infer_flood(props, text)
+    flood, flood_cues, flood_reasoning = infer_flood(props, text, flood_context)
     quake, quake_cues = infer_earthquake(props, material, text)
-    slide, slide_cues = infer_landslide(props, text)
+    slide, slide_cues = infer_landslide(props, text, flood_context)
 
-    status, research_conf = verification_status(props, material_conf, material_reason)
+    updated_flood_context = replace(
+        flood_context,
+        flood_hazard_band=classify_flood_hazard_band(flood),
+        flood_reasoning=flood_reasoning,
+    )
+
+    status, research_conf = verification_status(props, material_conf, material_reason, updated_flood_context)
 
     props["predominant_material"] = material
-    props["material_confidence"] = rounded(clamp(material_conf, 0.0, 1.0))
+    props["material_confidence"] = rounded_confidence(clamp(material_conf, 0.0, 1.0))
     props["fire_danger_revised"] = fire
     props["flood_danger_revised"] = flood
     props["earthquake_danger_revised"] = quake
     props["landslide_danger_revised"] = slide
+    props["elevation_m"] = updated_flood_context.elevation_m
+    props["inside_frequent_flood_zone"] = updated_flood_context.inside_frequent_flood_zone
+    props["inside_rare_flood_zone"] = updated_flood_context.inside_rare_flood_zone
+    props["inside_very_rare_flood_zone"] = updated_flood_context.inside_very_rare_flood_zone
+    props["distance_to_river_m"] = updated_flood_context.distance_to_river_m
+    props["distance_to_flood_zone_m"] = updated_flood_context.distance_to_flood_zone_m
+    props["nearest_river_name"] = updated_flood_context.nearest_river_name
+    props["nearest_river_type"] = updated_flood_context.nearest_river_type
+    props["nearest_river_flow_regime"] = updated_flood_context.nearest_river_flow_regime
+    props["nearest_river_kind"] = updated_flood_context.nearest_river_kind
+    props["nearest_river_elevation_m"] = updated_flood_context.nearest_river_elevation_m
+    props["relative_height_above_nearest_river_m"] = updated_flood_context.relative_height_above_nearest_river_m
+    props["local_slope_deg"] = updated_flood_context.local_slope_deg
+    props["terrain_position"] = updated_flood_context.terrain_position
+    props["river_distance_band"] = updated_flood_context.river_distance_band
+    props["flood_zone_distance_band"] = updated_flood_context.flood_zone_distance_band
+    props["terrain_context_confidence"] = updated_flood_context.terrain_context_confidence
+    props["terrain_context_method"] = updated_flood_context.terrain_context_method
+    props["flood_official_score"] = rounded_score(updated_flood_context.flood_official_score)
+    props["flood_proximity_score"] = rounded_score(updated_flood_context.flood_proximity_score)
+    props["flood_hazard_band"] = updated_flood_context.flood_hazard_band
+    props["flood_reasoning"] = updated_flood_context.flood_reasoning
+    props["flood_model_version"] = FLOOD_MODEL_VERSION
     props["danger_revision_reasoning"] = reasoning_sentence(
         material,
         fire,
@@ -446,9 +1039,10 @@ def enrich_feature(feature: dict[str, object]) -> dict[str, object]:
         flood_cues,
         quake_cues,
         slide_cues,
+        updated_flood_context,
     )
     props["verification_status"] = status
-    props["verification_notes"] = verification_notes(material_reason, status)
+    props["verification_notes"] = verification_notes(material_reason, status, updated_flood_context)
     props["sources"] = build_sources(props)
     props["research_confidence"] = research_conf
     return feature
@@ -460,17 +1054,16 @@ def validate(data: dict[str, object]) -> None:
 
     for idx, feature in enumerate(data.get("features", []), start=1):
         props = feature.get("properties", {})
-        for revised_field, original_field in FIELD_MAP.items():
+        for revised_field in FIELD_MAP:
             if revised_field not in props:
                 raise ValueError(f"Missing {revised_field} on feature {idx}.")
             value = props[revised_field]
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 raise ValueError(f"{revised_field} is not numeric on feature {idx}.")
-            if rounded(value) != value:
+            if rounded_score(float(value)) != float(value):
                 raise ValueError(f"{revised_field} does not have one decimal place on feature {idx}.")
-            original = float(props.get(original_field) or 0.0)
-            if abs(float(value) - original) > 1.0 + 1e-9:
-                raise ValueError(f"{revised_field} exceeds +/-1.0 delta on feature {idx}.")
+            if not (0.0 <= float(value) <= 4.0):
+                raise ValueError(f"{revised_field} falls outside the 0..4 range on feature {idx}.")
 
         for required in (
             "predominant_material",
@@ -480,12 +1073,33 @@ def validate(data: dict[str, object]) -> None:
             "verification_notes",
             "sources",
             "research_confidence",
-        ):
+            "flood_reasoning",
+            "flood_model_version",
+            "terrain_context_method",
+            "terrain_context_confidence",
+            "flood_official_score",
+            "flood_proximity_score",
+            "flood_hazard_band",
+        ) + SITE_LEVEL_FEATURES:
             if required not in props:
                 raise ValueError(f"Missing {required} on feature {idx}.")
 
         if props["verification_status"] not in {"verified", "partially_verified", "weakly_verified"}:
             raise ValueError(f"Invalid verification_status on feature {idx}.")
+        if props["flood_hazard_band"] not in {"very_low", "low", "moderate", "high", "very_high"}:
+            raise ValueError(f"Invalid flood_hazard_band on feature {idx}.")
+        if props["terrain_position"] not in {
+            "active_floodplain",
+            "floodplain",
+            "valley_floor",
+            "low_terrace",
+            "elevated_terrace",
+            "gentle_hillside",
+            "valley_side",
+            "ridge_or_high_ground",
+            "upland",
+        }:
+            raise ValueError(f"Invalid terrain_position on feature {idx}.")
         if not isinstance(props["sources"], list) or not (2 <= len(props["sources"]) <= 6):
             raise ValueError(f"Invalid sources array on feature {idx}.")
 
@@ -495,8 +1109,13 @@ def main() -> None:
         data = json.load(handle)
 
     features = data.get("features", [])
-    for i, feature in enumerate(features):
-        features[i] = enrich_feature(feature)
+    print(f"Loaded {len(features)} features from {INPUT_PATH}")
+    print("Computing official flood, river, and terrain contexts...")
+    flood_contexts = compute_geospatial_contexts(features)
+
+    print("Enriching feature properties...")
+    for idx, feature in enumerate(features):
+        features[idx] = enrich_feature(feature, flood_contexts[idx])
 
     validate(data)
 

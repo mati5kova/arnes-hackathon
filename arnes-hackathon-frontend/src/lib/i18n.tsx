@@ -93,16 +93,18 @@ export const messages = {
             },
             overlay: {
                 title: "Overlays",
-                groupAria: "Hazard overlays",
+                groupAria: "Map overlays",
                 options: {
                     fire: "Fire",
                     flood: "Flood",
                     air: "Air",
                     landslide: "Landslide",
+                    river: "Rivers",
                 },
                 overlayAriaSuffix: "overlay",
                 leastLabel: "Least endangered",
                 mostLabel: "Most endangered",
+                riverNote: "Official watercourse network",
                 noneActive: "No overlay active",
                 scaleSuffix: "scale",
                 loading: "Loading overlay data...",
@@ -113,6 +115,7 @@ export const messages = {
                 units: {
                     areas: "areas",
                     cells: "cells",
+                    lines: "lines",
                 },
             },
             legend: {
@@ -145,6 +148,7 @@ export const messages = {
             type: "Type",
             municipality: "Municipality",
             protection: "Protection",
+            elevation: "Elevation",
             coordinates: "Coordinates",
             loading: "Loading full site details...",
             additionalData: "Additional data",
@@ -241,16 +245,18 @@ export const messages = {
             },
             overlay: {
                 title: "Sloji",
-                groupAria: "Sloji nevarnosti",
+                groupAria: "Kartni sloji",
                 options: {
                     fire: "Požar",
                     flood: "Poplava",
                     air: "Zrak",
                     landslide: "Plaz",
+                    river: "Reke",
                 },
                 overlayAriaSuffix: "sloj",
                 leastLabel: "Najmanj ogroženo",
                 mostLabel: "Najbolj ogroženo",
+                riverNote: "Uradna mreža vodotokov",
                 noneActive: "Ni aktivnega sloja",
                 scaleSuffix: "lestvica",
                 loading: "Nalaganje podatkov sloja...",
@@ -261,6 +267,7 @@ export const messages = {
                 units: {
                     areas: "območij",
                     cells: "celic",
+                    lines: "linij",
                 },
             },
             legend: {
@@ -294,6 +301,7 @@ export const messages = {
             type: "Tip",
             municipality: "Občina",
             protection: "Varstvo",
+            elevation: "Nadmorska višina",
             coordinates: "Koordinate",
             loading: "Nalaganje celotnih podrobnosti lokacije...",
             additionalData: "Dodatni podatki",
