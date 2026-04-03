@@ -335,7 +335,7 @@ def test_build_area_grid_cells_with_rasterio_returns_non_empty_cells():
 
 
 def test_overlay_source_paths_exist():
-    source_paths = {
+    required_source_paths = {
         "OVERLAY_HAZARD_FILE": service.OVERLAY_HAZARD_FILE,
         "OVERLAY_AIR_FILE": service.OVERLAY_AIR_FILE,
         "OVERLAY_FIRE_AREA_FILE": service.OVERLAY_FIRE_AREA_FILE,
@@ -344,12 +344,11 @@ def test_overlay_source_paths_exist():
         "OVERLAY_FLOOD_VERY_RARE_SHP": service.OVERLAY_FLOOD_VERY_RARE_SHP,
         "OVERLAY_LANDSLIDE_SHP": service.OVERLAY_LANDSLIDE_SHP,
         "OVERLAY_LANDSLIDE_DBF": service.OVERLAY_LANDSLIDE_DBF,
-        "OVERLAY_RIVER_LINE_SHP": service.OVERLAY_RIVER_LINE_SHP,
     }
 
     missing = [
         f"{name} -> {path}"
-        for name, path in source_paths.items()
+        for name, path in required_source_paths.items()
         if not Path(path).is_file()
     ]
     assert not missing, (
@@ -357,6 +356,17 @@ def test_overlay_source_paths_exist():
         "set the OVERLAY_* env vars.\n"
         + "\n".join(missing)
     )
+
+
+def test_load_overlay_lines_returns_empty_river_records_when_local_dataset_is_missing(monkeypatch):
+    monkeypatch.setattr(service, "OVERLAY_RIVER_LINE_SHP", "/tmp/does-not-exist-river.shp")
+
+    result = service.load_overlay_lines()
+
+    assert result["river"] == {
+        "path": "/tmp/does-not-exist-river.shp",
+        "records": [],
+    }
 
 
 def _empty_overlay_cache() -> dict:

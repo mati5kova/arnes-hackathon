@@ -474,11 +474,14 @@ def load_overlay_areas() -> dict[str, list[dict[str, Any]]]:
 def load_overlay_lines() -> dict[str, dict[str, Any] | None]:
     line_source_by_kind: dict[str, dict[str, Any] | None] = {kind: None for kind in OVERLAY_DEFINITIONS}
 
-    river_records = read_polyline_shapefile_index(
-        Path(OVERLAY_RIVER_LINE_SHP),
-        id_prefix="river",
-    )
-    river_records.sort(key=lambda record: str(record["id"]))
+    river_path = Path(OVERLAY_RIVER_LINE_SHP)
+    river_records: list[dict[str, Any]] = []
+    if river_path.is_file():
+        river_records = read_polyline_shapefile_index(
+            river_path,
+            id_prefix="river",
+        )
+        river_records.sort(key=lambda record: str(record["id"]))
     line_source_by_kind["river"] = {
         "path": OVERLAY_RIVER_LINE_SHP,
         "records": river_records,
