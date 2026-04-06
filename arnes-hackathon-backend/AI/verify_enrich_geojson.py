@@ -24,33 +24,178 @@ METRIC_CRS = "EPSG:3794"
 FLOOD_MODEL_VERSION = "drsv-flood-river-terrain-v2"
 
 GENERAL_SOURCE_STRINGS = [
-    "RNPD register metadata and descriptive fields",
-    "DRSV official flood warning maps (frequent, rare, very rare)",
-    "DRSV HIDRO5_LIN_PV official hydrography network",
-    "Site elevation from kd_visine.geojson",
-    "Terrain context estimated from nearest-river Z and official flood polygons (no DEM raster in repository)",
-    "ARSO potresna nevarnost (2021), GeoZS landslide map 1:25k, ARSO/URSZR fire context",
+    "Metapodatki registra RNPD in opisna polja",
+    "Uradne opozorilne karte poplav DRSV (pogoste, redke, zelo redke)",
+    "Uradno hidrografsko omrezje DRSV HIDRO5_LIN_PV",
+    "Visina lokacije iz kd_visine.geojson",
+    "Kontekst terena ocenjen iz Z najblizjega vodotoka in uradnih poplavnih poligonov (DEM raster ni v repozitoriju)",
+    "ARSO potresna nevarnost (2021), GeoZS karta plazov 1:25k, ARSO/URSZR kontekst pozarne nevarnosti",
 ]
 
 FIELD_MAP = {
-    "fire_danger_revised": "pozar",
-    "flood_danger_revised": "poplave",
-    "earthquake_danger_revised": "potres",
-    "landslide_danger_revised": "plazovi",
+    "pozar_ocena_popravljena": "pozar",
+    "poplave_ocena_popravljena": "poplave",
+    "potres_ocena_popravljena": "potres",
+    "plazovi_ocena_popravljena": "plazovi",
 }
 
 SITE_LEVEL_FEATURES = (
-    "inside_frequent_flood_zone",
-    "inside_rare_flood_zone",
-    "inside_very_rare_flood_zone",
-    "distance_to_river_m",
-    "distance_to_flood_zone_m",
-    "elevation_m",
-    "nearest_river_elevation_m",
-    "relative_height_above_nearest_river_m",
-    "local_slope_deg",
-    "terrain_position",
+    "znotraj_obmocja_pogostih_poplav",
+    "znotraj_obmocja_redkih_poplav",
+    "znotraj_obmocja_zelo_redkih_poplav",
+    "razdalja_do_reke_m",
+    "razdalja_do_poplavnega_obmocja_m",
+    "visina_m",
+    "visina_najblizje_reke_m",
+    "relativna_visina_nad_najblizjo_reko_m",
+    "lokalni_naklon_stopinje",
+    "lega_terena",
 )
+
+OUTPUT_FIELD_NAMES = {
+    "predominant_material": "prevladujoci_material",
+    "material_confidence": "zanesljivost_materiala",
+    "fire_danger_revised": "pozar_ocena_popravljena",
+    "flood_danger_revised": "poplave_ocena_popravljena",
+    "earthquake_danger_revised": "potres_ocena_popravljena",
+    "landslide_danger_revised": "plazovi_ocena_popravljena",
+    "elevation_m": "visina_m",
+    "inside_frequent_flood_zone": "znotraj_obmocja_pogostih_poplav",
+    "inside_rare_flood_zone": "znotraj_obmocja_redkih_poplav",
+    "inside_very_rare_flood_zone": "znotraj_obmocja_zelo_redkih_poplav",
+    "distance_to_river_m": "razdalja_do_reke_m",
+    "distance_to_flood_zone_m": "razdalja_do_poplavnega_obmocja_m",
+    "nearest_river_name": "ime_najblizje_reke",
+    "nearest_river_type": "tip_najblizje_reke",
+    "nearest_river_flow_regime": "rezim_toka_najblizje_reke",
+    "nearest_river_kind": "vrsta_najblizje_reke",
+    "nearest_river_elevation_m": "visina_najblizje_reke_m",
+    "relative_height_above_nearest_river_m": "relativna_visina_nad_najblizjo_reko_m",
+    "local_slope_deg": "lokalni_naklon_stopinje",
+    "terrain_position": "lega_terena",
+    "river_distance_band": "pas_razdalje_do_reke",
+    "flood_zone_distance_band": "pas_razdalje_do_poplavnega_obmocja",
+    "terrain_context_confidence": "zanesljivost_konteksta_terena",
+    "terrain_context_method": "metoda_konteksta_terena",
+    "flood_official_score": "uradna_ocena_poplav",
+    "flood_proximity_score": "ocena_blizine_poplav",
+    "flood_hazard_band": "pas_poplavne_nevarnosti",
+    "flood_reasoning": "utemeljitev_poplav",
+    "flood_model_version": "razlicica_modela_poplav",
+    "danger_revision_reasoning": "utemeljitev_popravka_nevarnosti",
+    "verification_status": "status_preveritve",
+    "verification_notes": "opombe_preveritve",
+    "sources": "viri",
+    "research_confidence": "zanesljivost_raziskave",
+}
+
+MATERIAL_LABELS = {
+    "stone/marble": "kamen/marmor",
+    "metal and concrete": "kovina in beton",
+    "reinforced concrete": "armirani beton",
+    "stone and concrete infrastructure": "kamnita in betonska infrastruktura",
+    "earthworks and stone": "zemeljski nasipi in kamen",
+    "mixed masonry and wood": "mesana zidana in lesena gradnja",
+    "wood": "les",
+    "brick masonry": "opecno zidovje",
+    "stone masonry": "kamnito zidovje",
+    "wood and mixed rural fabric": "les in mesano podezelsko tkivo",
+    "vegetation and masonry features": "vegetacija in zidani elementi",
+    "mixed heritage fabric": "mesano dediscinsko tkivo",
+    "mixed masonry": "mesano zidovje",
+}
+
+MATERIAL_REASON_LABELS = {
+    "material explicit in memorial marker wording": "material je izrecno naveden v poimenovanju spominskega obelezja",
+    "explicit metal and concrete wording": "izrecno omenjena kovina in beton",
+    "infrastructure wording with metal cues": "opis infrastrukture vsebuje namige za kovino",
+    "explicit concrete or postwar construction wording": "izrecno omenjen beton ali povojna gradnja",
+    "infrastructure wording dominates": "opis infrastrukture prevladuje",
+    "archaeological earthworks and masonry remains": "arheoloski zemeljski nasipi in zidani ostanki",
+    "explicit timber and masonry cues": "izrecno omenjena lesena in zidana gradnja",
+    "explicit timber wording": "izrecno omenjen les",
+    "explicit brick/masonry wording": "izrecno omenjena opeka oziroma zidovje",
+    "explicit stone or marble wording": "izrecno omenjen kamen ali marmor",
+    "building type usually masonry and description supports it": "tip objekta je obicajno zidan, opis pa to podpira",
+    "explicit masonry wording": "izrecno omenjeno zidovje",
+    "highland rural ensemble with wooden structures": "visokogorski podezelski sklop z lesenimi objekti",
+    "park/garden ensemble with limited structural specificity": "parkovni oziroma vrtni sklop z omejeno konstrukcijsko dolocnostjo",
+    "ensemble or settlement description is broader than one structure": "opis sklopa ali naselja je sirsi od posamezne strukture",
+    "building record but material only weakly implied": "evidenca stavbe, vendar je material le sibko nakazan",
+    "material largely inferred from broad type": "material je v veliki meri sklepan iz splosne vrste",
+}
+
+CUE_LABELS = {
+    "timber construction": "lesena konstrukcija",
+    "mixed timber elements": "mesani leseni elementi",
+    "non-combustible remains/marker": "negorljivi ostanki oziroma oznaka",
+    "mostly open-air archaeological fabric": "pretežno odprta arheoloska struktura",
+    "documented fire history": "dokumentirana zgodovina pozarov",
+    "Primorska wildfire exposure": "izpostavljenost pozarom v Primorski",
+    "highly combustible farm/outbuilding type": "zelo gorljiv gospodarski oziroma pomocni objekt",
+    "light timber structures": "lahke lesene konstrukcije",
+    "mixed traditional fabric": "mesana tradicionalna struktura",
+    "older unreinforced masonry likely": "verjetno starejse nearmirano zidovje",
+    "stone fabric": "kamnita struktura",
+    "heavier built fabric": "tezja grajena struktura",
+    "engineered structure": "inzenirska konstrukcija",
+    "rigid infrastructure fabric": "toga infrastrukturna struktura",
+    "open-air remains": "ostanki na prostem",
+    "ensemble with vulnerable traditional structures": "sklop z ranljivimi tradicionalnimi strukturami",
+    "tower/heavy masonry elements": "stolpni oziroma tezki zidani elementi",
+    "documented earthquake damage/history": "dokumentirana potresna skoda oziroma zgodovina",
+    "explicit landslide/rockfall wording": "izrecno omenjen plaz oziroma podor",
+    "slope-edge siting": "lega na robu pobocja",
+    "steep terrain wording": "opis strmega terena",
+    "river-side terrain appears steep": "teren ob reki deluje strm",
+    "river plain/terrace context": "kontekst recne ravnice oziroma terase",
+    "site intersects the frequent official flood polygon": "lokacija seka uradni poligon pogostih poplav",
+    "site intersects the rare official flood polygon": "lokacija seka uradni poligon redkih poplav",
+    "site intersects the very-rare official flood polygon": "lokacija seka uradni poligon zelo redkih poplav",
+    "outside official polygons, flood score derived conservatively from river distance, flood-zone distance, and relative height above the nearest river": "zunaj uradnih poligonov, ocena poplav je previdno izpeljana iz razdalje do reke, razdalje do poplavnega obmocja in relativne visine nad najblizjo reko",
+    "register wording independently mentions floodplain or island context": "besedilo registra samostojno omenja poplavno ravnico ali otoski kontekst",
+    "register wording confirms elevated terrain": "besedilo registra potrjuje dvignjen teren",
+}
+
+DISTANCE_BAND_LABELS = {
+    "adjacent": "tik_ob",
+    "near": "blizu",
+    "close": "blizje",
+    "intermediate": "srednje_dalec",
+    "far": "dalec",
+    "remote": "zelo_dalec",
+    "inside": "znotraj",
+    "touching": "v_stiku",
+    "very_near": "zelo_blizu",
+    "moderate": "zmerno_dalec",
+    "unknown": "neznano",
+}
+
+TERRAIN_POSITION_LABELS = {
+    "active_floodplain": "aktivna_poplavna_ravnica",
+    "floodplain": "poplavna_ravnica",
+    "valley_floor": "dolinsko_dno",
+    "low_terrace": "nizka_terasa",
+    "elevated_terrace": "dvignjena_terasa",
+    "ridge_or_high_ground": "greben_ali_visji_teren",
+    "valley_side": "dolinsko_pobocje",
+    "upland": "visji_svet",
+    "gentle_hillside": "polozno_pobocje",
+}
+
+FLOOD_HAZARD_BAND_LABELS = {
+    "very_high": "zelo_visoka",
+    "high": "visoka",
+    "moderate": "zmerna",
+    "low": "nizka",
+    "very_low": "zelo_nizka",
+}
+
+VERIFICATION_STATUS_LABELS = {
+    "verified": "preverjeno",
+    "partially_verified": "delno_preverjeno",
+    "weakly_verified": "sibko_preverjeno",
+}
 
 
 @dataclass(slots=True)
@@ -77,6 +222,38 @@ class FloodContext:
     flood_proximity_score: float
     flood_hazard_band: str
     flood_reasoning: str
+
+
+def localized_field(name: str) -> str:
+    return OUTPUT_FIELD_NAMES.get(name, name)
+
+
+def localized_material(value: str) -> str:
+    return MATERIAL_LABELS.get(value, value)
+
+
+def localized_material_reason(value: str) -> str:
+    return MATERIAL_REASON_LABELS.get(value, value)
+
+
+def localized_cue(value: str) -> str:
+    return CUE_LABELS.get(value, value)
+
+
+def localized_distance_band(value: str) -> str:
+    return DISTANCE_BAND_LABELS.get(value, value)
+
+
+def localized_terrain_position(value: str) -> str:
+    return TERRAIN_POSITION_LABELS.get(value, value)
+
+
+def localized_flood_band(value: str) -> str:
+    return FLOOD_HAZARD_BAND_LABELS.get(value, value)
+
+
+def localized_verification_status(value: str) -> str:
+    return VERIFICATION_STATUS_LABELS.get(value, value)
 
 
 def normalize(value: object) -> str:
@@ -665,34 +842,36 @@ def infer_flood(props: dict[str, object], text: str, flood_context: FloodContext
 
 
 def build_flood_reasoning(*, flood_context: FloodContext, score: float, band: str) -> str:
-    river_name = flood_context.nearest_river_name or "the nearest mapped watercourse"
-    river_distance = "unknown" if flood_context.distance_to_river_m is None else f"{flood_context.distance_to_river_m:.1f} m"
-    flood_distance = "unknown" if flood_context.distance_to_flood_zone_m is None else f"{flood_context.distance_to_flood_zone_m:.1f} m"
+    river_name = flood_context.nearest_river_name or "najblizji evidentirani vodotok"
+    river_distance = "neznano" if flood_context.distance_to_river_m is None else f"{flood_context.distance_to_river_m:.1f} m"
+    flood_distance = "neznano" if flood_context.distance_to_flood_zone_m is None else f"{flood_context.distance_to_flood_zone_m:.1f} m"
     rel_height = (
-        "unknown"
+        "neznano"
         if flood_context.relative_height_above_nearest_river_m is None
         else f"{flood_context.relative_height_above_nearest_river_m:.1f} m"
     )
+    localized_band = localized_flood_band(band)
+    localized_terrain = localized_terrain_position(flood_context.terrain_position)
 
     if flood_context.inside_frequent_flood_zone:
         return (
-            f"Inside the official frequent-flood polygon; nearest river context is {river_name} at {river_distance}, "
-            f"with the site {rel_height} above the sampled river level. Final flood band: {band}."
+            f"Lokacija lezi znotraj uradnega poligona pogostih poplav; najblizji recni kontekst je {river_name} na razdalji {river_distance}, "
+            f"pri cemer je lokacija {rel_height} nad vzorceno gladino reke. Koncni pas poplavne nevarnosti: {localized_band}."
         )
     if flood_context.inside_rare_flood_zone:
         return (
-            f"Inside the official rare-flood polygon; nearest river context is {river_name} at {river_distance}, "
-            f"and the site stands {rel_height} above the sampled river level. Final flood band: {band}."
+            f"Lokacija lezi znotraj uradnega poligona redkih poplav; najblizji recni kontekst je {river_name} na razdalji {river_distance}, "
+            f"lokacija pa stoji {rel_height} nad vzorceno gladino reke. Koncni pas poplavne nevarnosti: {localized_band}."
         )
     if flood_context.inside_very_rare_flood_zone:
         return (
-            f"Inside the official very-rare-flood polygon; nearest river context is {river_name} at {river_distance}, "
-            f"and the site stands {rel_height} above the sampled river level. Final flood band: {band}."
+            f"Lokacija lezi znotraj uradnega poligona zelo redkih poplav; najblizji recni kontekst je {river_name} na razdalji {river_distance}, "
+            f"lokacija pa stoji {rel_height} nad vzorceno gladino reke. Koncni pas poplavne nevarnosti: {localized_band}."
         )
     return (
-        f"Outside the official flood polygons; nearest river context is {river_name} at {river_distance}, nearest mapped flood zone is {flood_distance}, "
-        f"the site stands {rel_height} above the sampled river level, and the terrain is classified as {flood_context.terrain_position}. "
-        f"Final flood band: {band}."
+        f"Lokacija lezi zunaj uradnih poplavnih poligonov; najblizji recni kontekst je {river_name} na razdalji {river_distance}, "
+        f"najblizje evidentirano poplavno obmocje je oddaljeno {flood_distance}, lokacija pa stoji {rel_height} nad vzorceno gladino reke, "
+        f"teren pa je razvrscen kot {localized_terrain}. Koncni pas poplavne nevarnosti: {localized_band}."
     )
 
 
@@ -747,6 +926,7 @@ def reasoning_sentence(
     slide_cues: list[str],
     flood_context: FloodContext,
 ) -> str:
+    localized_material_label = localized_material(material)
     original = {
         "fire": float(props.get("pozar") or 0.0),
         "flood": float(props.get("poplave") or 0.0),
@@ -755,35 +935,39 @@ def reasoning_sentence(
     }
     revisions: list[str] = []
     if abs(fire - original["fire"]) >= 0.2:
-        revisions.append("fire nudged for " + (fire_cues[0] if fire_cues else "material"))
+        revisions.append("pozarna ocena je prilagojena zaradi " + localized_cue(fire_cues[0] if fire_cues else "timber construction"))
     if abs(flood - original["flood"]) >= 0.2:
-        revisions.append("flood re-modeled from official polygons, river distance, and relative terrain")
+        revisions.append("poplavna ocena je ponovno modelirana iz uradnih poligonov, razdalje do reke in relativne lege terena")
     if abs(quake - original["earthquake"]) >= 0.2:
-        revisions.append("earthquake set modestly above zero for " + (quake_cues[0] if quake_cues else "structural vulnerability"))
+        revisions.append(
+            "potresna ocena je zmerno povisana zaradi "
+            + localized_cue(quake_cues[0] if quake_cues else "ensemble with vulnerable traditional structures")
+        )
     if abs(slide - original["landslide"]) >= 0.2:
-        revisions.append("landslide nudged for " + (slide_cues[0] if slide_cues else "terrain"))
+        revisions.append("ocena plazov je prilagojena zaradi " + localized_cue(slide_cues[0] if slide_cues else "steep terrain wording"))
 
     flood_fragment = (
-        f"nearest-river distance {flood_context.distance_to_river_m:.1f} m, relative height {flood_context.relative_height_above_nearest_river_m:.1f} m"
+        f"razdalje do najblizje reke {flood_context.distance_to_river_m:.1f} m in relativne visine {flood_context.relative_height_above_nearest_river_m:.1f} m"
         if flood_context.distance_to_river_m is not None and flood_context.relative_height_above_nearest_river_m is not None
-        else "river-relative terrain estimated from official hydrography"
+        else "relativnega terena glede na reko, ocenjenega iz uradne hidrografije"
     )
 
     if revisions:
-        return f"Official register record supports {material}; {'; '.join(revisions[:3])}; flood context uses {flood_fragment}."
-    return f"Official register record supports {material}; revised scores stay near the baseline, while flood context uses {flood_fragment}."
+        return f"Uradni registrski zapis podpira material {localized_material_label}; {'; '.join(revisions[:3])}; poplavni kontekst uporablja {flood_fragment}."
+    return f"Uradni registrski zapis podpira material {localized_material_label}; popravljene ocene ostajajo blizu izhodisca, poplavni kontekst pa uporablja {flood_fragment}."
 
 
 def verification_notes(material_reason: str, status: str, flood_context: FloodContext) -> str:
-    material_reason = material_reason[0].lower() + material_reason[1:] if material_reason else "is inferred"
-    if material_reason.startswith("material "):
-        material_reason = material_reason[len("material "):]
-    terrain_note = f"terrain position {flood_context.terrain_position}, confidence {flood_context.terrain_context_confidence:.2f}"
+    material_reason = localized_material_reason(material_reason) if material_reason else "je sklepan"
+    terrain_note = (
+        f"lega terena {localized_terrain_position(flood_context.terrain_position)}, "
+        f"zanesljivost {flood_context.terrain_context_confidence:.2f}"
+    )
     if status == "verified":
-        return f"Identity anchored by official register links; material basis: {material_reason}; flood context uses official polygons and hydrography with {terrain_note}."
+        return f"Identiteta je zasidrana v uradnih registrskih povezavah; osnova za material: {material_reason}; poplavni kontekst uporablja uradne poligone in hidrografijo z opombo: {terrain_note}."
     if status == "partially_verified":
-        return f"Identity anchored by official register metadata; material basis: {material_reason}; flood context uses official polygons and hydrography with {terrain_note}."
-    return f"Identity likely from official register metadata; material mostly inferred because the description is broad; flood context still uses official polygons and hydrography with {terrain_note}."
+        return f"Identiteta je zasidrana v uradnih registrskih metapodatkih; osnova za material: {material_reason}; poplavni kontekst uporablja uradne poligone in hidrografijo z opombo: {terrain_note}."
+    return f"Identiteta verjetno izhaja iz uradnih registrskih metapodatkov; material je vecinoma sklepan, ker je opis sirok; poplavni kontekst se vedno uporablja uradne poligone in hidrografijo z opombo: {terrain_note}."
 
 
 def build_boolean_flags(points: np.ndarray, polygons: np.ndarray) -> np.ndarray:
@@ -961,7 +1145,7 @@ def compute_geospatial_contexts(features: list[dict[str, Any]]) -> list[FloodCon
             river_distance_band=classify_distance_band(river_distance_m, river=True),
             flood_zone_distance_band=classify_distance_band(distance_to_flood_zone_m, river=False),
             terrain_context_confidence=terrain_context_conf,
-            terrain_context_method="estimated from official flood polygons, nearest river geometry, river Z, and site elevation; no DEM raster available",
+            terrain_context_method="ocenjeno iz uradnih poplavnih poligonov, geometrije najblizje reke, Z-vrednosti reke in visine lokacije; DEM raster ni na voljo",
             flood_official_score=official_score,
             flood_proximity_score=rounded_score(proximity_score),
             flood_hazard_band="unknown",
@@ -999,36 +1183,36 @@ def enrich_feature(feature: dict[str, Any], flood_context: FloodContext) -> dict
 
     status, research_conf = verification_status(props, material_conf, material_reason, updated_flood_context)
 
-    props["predominant_material"] = material
-    props["material_confidence"] = rounded_confidence(clamp(material_conf, 0.0, 1.0))
-    props["fire_danger_revised"] = fire
-    props["flood_danger_revised"] = flood
-    props["earthquake_danger_revised"] = quake
-    props["landslide_danger_revised"] = slide
-    props["elevation_m"] = updated_flood_context.elevation_m
-    props["inside_frequent_flood_zone"] = updated_flood_context.inside_frequent_flood_zone
-    props["inside_rare_flood_zone"] = updated_flood_context.inside_rare_flood_zone
-    props["inside_very_rare_flood_zone"] = updated_flood_context.inside_very_rare_flood_zone
-    props["distance_to_river_m"] = updated_flood_context.distance_to_river_m
-    props["distance_to_flood_zone_m"] = updated_flood_context.distance_to_flood_zone_m
-    props["nearest_river_name"] = updated_flood_context.nearest_river_name
-    props["nearest_river_type"] = updated_flood_context.nearest_river_type
-    props["nearest_river_flow_regime"] = updated_flood_context.nearest_river_flow_regime
-    props["nearest_river_kind"] = updated_flood_context.nearest_river_kind
-    props["nearest_river_elevation_m"] = updated_flood_context.nearest_river_elevation_m
-    props["relative_height_above_nearest_river_m"] = updated_flood_context.relative_height_above_nearest_river_m
-    props["local_slope_deg"] = updated_flood_context.local_slope_deg
-    props["terrain_position"] = updated_flood_context.terrain_position
-    props["river_distance_band"] = updated_flood_context.river_distance_band
-    props["flood_zone_distance_band"] = updated_flood_context.flood_zone_distance_band
-    props["terrain_context_confidence"] = updated_flood_context.terrain_context_confidence
-    props["terrain_context_method"] = updated_flood_context.terrain_context_method
-    props["flood_official_score"] = rounded_score(updated_flood_context.flood_official_score)
-    props["flood_proximity_score"] = rounded_score(updated_flood_context.flood_proximity_score)
-    props["flood_hazard_band"] = updated_flood_context.flood_hazard_band
-    props["flood_reasoning"] = updated_flood_context.flood_reasoning
-    props["flood_model_version"] = FLOOD_MODEL_VERSION
-    props["danger_revision_reasoning"] = reasoning_sentence(
+    props[localized_field("predominant_material")] = localized_material(material)
+    props[localized_field("material_confidence")] = rounded_confidence(clamp(material_conf, 0.0, 1.0))
+    props[localized_field("fire_danger_revised")] = fire
+    props[localized_field("flood_danger_revised")] = flood
+    props[localized_field("earthquake_danger_revised")] = quake
+    props[localized_field("landslide_danger_revised")] = slide
+    props[localized_field("elevation_m")] = updated_flood_context.elevation_m
+    props[localized_field("inside_frequent_flood_zone")] = updated_flood_context.inside_frequent_flood_zone
+    props[localized_field("inside_rare_flood_zone")] = updated_flood_context.inside_rare_flood_zone
+    props[localized_field("inside_very_rare_flood_zone")] = updated_flood_context.inside_very_rare_flood_zone
+    props[localized_field("distance_to_river_m")] = updated_flood_context.distance_to_river_m
+    props[localized_field("distance_to_flood_zone_m")] = updated_flood_context.distance_to_flood_zone_m
+    props[localized_field("nearest_river_name")] = updated_flood_context.nearest_river_name
+    props[localized_field("nearest_river_type")] = updated_flood_context.nearest_river_type
+    props[localized_field("nearest_river_flow_regime")] = updated_flood_context.nearest_river_flow_regime
+    props[localized_field("nearest_river_kind")] = updated_flood_context.nearest_river_kind
+    props[localized_field("nearest_river_elevation_m")] = updated_flood_context.nearest_river_elevation_m
+    props[localized_field("relative_height_above_nearest_river_m")] = updated_flood_context.relative_height_above_nearest_river_m
+    props[localized_field("local_slope_deg")] = updated_flood_context.local_slope_deg
+    props[localized_field("terrain_position")] = localized_terrain_position(updated_flood_context.terrain_position)
+    props[localized_field("river_distance_band")] = localized_distance_band(updated_flood_context.river_distance_band)
+    props[localized_field("flood_zone_distance_band")] = localized_distance_band(updated_flood_context.flood_zone_distance_band)
+    props[localized_field("terrain_context_confidence")] = updated_flood_context.terrain_context_confidence
+    props[localized_field("terrain_context_method")] = updated_flood_context.terrain_context_method
+    props[localized_field("flood_official_score")] = rounded_score(updated_flood_context.flood_official_score)
+    props[localized_field("flood_proximity_score")] = rounded_score(updated_flood_context.flood_proximity_score)
+    props[localized_field("flood_hazard_band")] = localized_flood_band(updated_flood_context.flood_hazard_band)
+    props[localized_field("flood_reasoning")] = updated_flood_context.flood_reasoning
+    props[localized_field("flood_model_version")] = FLOOD_MODEL_VERSION
+    props[localized_field("danger_revision_reasoning")] = reasoning_sentence(
         material,
         fire,
         flood,
@@ -1041,10 +1225,10 @@ def enrich_feature(feature: dict[str, Any], flood_context: FloodContext) -> dict
         slide_cues,
         updated_flood_context,
     )
-    props["verification_status"] = status
-    props["verification_notes"] = verification_notes(material_reason, status, updated_flood_context)
-    props["sources"] = build_sources(props)
-    props["research_confidence"] = research_conf
+    props[localized_field("verification_status")] = localized_verification_status(status)
+    props[localized_field("verification_notes")] = verification_notes(material_reason, status, updated_flood_context)
+    props[localized_field("sources")] = build_sources(props)
+    props[localized_field("research_confidence")] = research_conf
     return feature
 
 
@@ -1066,42 +1250,42 @@ def validate(data: dict[str, object]) -> None:
                 raise ValueError(f"{revised_field} falls outside the 0..4 range on feature {idx}.")
 
         for required in (
-            "predominant_material",
-            "material_confidence",
-            "danger_revision_reasoning",
-            "verification_status",
-            "verification_notes",
-            "sources",
-            "research_confidence",
-            "flood_reasoning",
-            "flood_model_version",
-            "terrain_context_method",
-            "terrain_context_confidence",
-            "flood_official_score",
-            "flood_proximity_score",
-            "flood_hazard_band",
+            localized_field("predominant_material"),
+            localized_field("material_confidence"),
+            localized_field("danger_revision_reasoning"),
+            localized_field("verification_status"),
+            localized_field("verification_notes"),
+            localized_field("sources"),
+            localized_field("research_confidence"),
+            localized_field("flood_reasoning"),
+            localized_field("flood_model_version"),
+            localized_field("terrain_context_method"),
+            localized_field("terrain_context_confidence"),
+            localized_field("flood_official_score"),
+            localized_field("flood_proximity_score"),
+            localized_field("flood_hazard_band"),
         ) + SITE_LEVEL_FEATURES:
             if required not in props:
                 raise ValueError(f"Missing {required} on feature {idx}.")
 
-        if props["verification_status"] not in {"verified", "partially_verified", "weakly_verified"}:
-            raise ValueError(f"Invalid verification_status on feature {idx}.")
-        if props["flood_hazard_band"] not in {"very_low", "low", "moderate", "high", "very_high"}:
-            raise ValueError(f"Invalid flood_hazard_band on feature {idx}.")
-        if props["terrain_position"] not in {
-            "active_floodplain",
-            "floodplain",
-            "valley_floor",
-            "low_terrace",
-            "elevated_terrace",
-            "gentle_hillside",
-            "valley_side",
-            "ridge_or_high_ground",
-            "upland",
+        if props[localized_field("verification_status")] not in set(VERIFICATION_STATUS_LABELS.values()):
+            raise ValueError(f"Invalid {localized_field('verification_status')} on feature {idx}.")
+        if props[localized_field("flood_hazard_band")] not in set(FLOOD_HAZARD_BAND_LABELS.values()):
+            raise ValueError(f"Invalid {localized_field('flood_hazard_band')} on feature {idx}.")
+        if props[localized_field("terrain_position")] not in {
+            "aktivna_poplavna_ravnica",
+            "poplavna_ravnica",
+            "dolinsko_dno",
+            "nizka_terasa",
+            "dvignjena_terasa",
+            "polozno_pobocje",
+            "dolinsko_pobocje",
+            "greben_ali_visji_teren",
+            "visji_svet",
         }:
-            raise ValueError(f"Invalid terrain_position on feature {idx}.")
-        if not isinstance(props["sources"], list) or not (2 <= len(props["sources"]) <= 6):
-            raise ValueError(f"Invalid sources array on feature {idx}.")
+            raise ValueError(f"Invalid {localized_field('terrain_position')} on feature {idx}.")
+        if not isinstance(props[localized_field("sources")], list) or not (2 <= len(props[localized_field("sources")]) <= 6):
+            raise ValueError(f"Invalid {localized_field('sources')} array on feature {idx}.")
 
 
 def main() -> None:
@@ -1110,10 +1294,10 @@ def main() -> None:
 
     features = data.get("features", [])
     print(f"Loaded {len(features)} features from {INPUT_PATH}")
-    print("Computing official flood, river, and terrain contexts...")
+    print("Racunam uradne poplavne, recne in terenske kontekste...")
     flood_contexts = compute_geospatial_contexts(features)
 
-    print("Enriching feature properties...")
+    print("Bogatim lastnosti objektov...")
     for idx, feature in enumerate(features):
         features[idx] = enrich_feature(feature, flood_contexts[idx])
 
