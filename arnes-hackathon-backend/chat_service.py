@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
+import chromadb
 
 from dotenv import load_dotenv
 
@@ -23,9 +24,12 @@ CHAT_USAGE_SUMMARY_FILE = Path(
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
 ACTIVE_MODEL_ENV_PREFIX = os.getenv("CHAT_ACTIVE_MODEL_ENV_PREFIX", "CHAT_MODEL_MDML_GPT4O_MINI_001")
 
+EMBED_MODEL='text-embedding-3-small'
+
 SYSTEM_PROMPT = (
-    "You are KULTURKO, a concise assistant for Slovenian cultural heritage risk data. "
-    "Use tools for exact facts and do not invent site details."
+    """You are KULTURKO, a concise assistant for Slovenian cultural heritage risk data.
+    Use tools for exact facts and do not invent site details. You have web search at your disposal. You can use that whenever you are not certain about your answer.
+    When using web_search always append your sources to the end of your repsonse to the user."""
 )
 
 DATA_LOCK = Lock()
@@ -235,13 +239,61 @@ def get_info_by_eid(eid: str, columns: list[str] | None = None) -> dict[str, Any
     return _json_safe(row.to_dict())
 
 
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
+collection = chroma_client.get_or_create_collection(name="monuments")
+
+def search_heritage_records(query: str, k: int = 5):
+    query_emb = embedClient.embeddings.create(
+        model=EMBED_MODEL,
+        input=[query]
+    ).data[0].embedding
+
+    where = {}
+    #lahko dodamo filter po npr obcini, ce to zelimo ze na tem nivoju
+
+    query_args = {
+        "query_embeddings": [query_emb],
+        "n_results": k,
+        "inlcude":['ids', 'metadata']
+        }
+    
+    if where:
+        query_args["where"] = where
+    
+    result = collection.query(**query_args)
+    #results->dict z moznimi: "ids", "metadatas", "documents"(text ki je bil embeddan)
+    return result.pop('documents', None)
+
+
 def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
     _ = use_web_search
     tools = [
         {
+            "type":"function",
+            "name":"search_heritage_records",
+            "description":"""Searches the heritage-record vector database using semantic similarity. Use this tool when the user is asking about monuments, heritage objects,
+                        materials, descriptions, categories, or related attributes that may exist in the indexed dataset. Returns the most relevant matching records,
+                        including their EID, stored metadata, and embedded source text. If the results are weak or irrelevant, say that clearly instead of treating them as authoritative""",
+            "parameters":{
+                "type":"object",
+                "properties":{
+                    "query":{
+                        "type":"string",
+                        "description":"users querry to do semantic search on"
+                    },
+                    "k":{
+                        "type":"integer",
+                        "description":"how many results from the database you want, default is 5"
+                    }
+                },
+                "required":['query'],
+                "additionalProperties":False
+            }
+        },
+        {
             "type": "function",
             "name": "top_k_endangered_in_region",
-            "description": "Returns a list of the top endangered objects in a region for one endangerment type.",
+            "description": "Returns a list of the top endangered objects in a region for one endangerment type. You can also use this to get all heritage sites in a region by entering a large k",
             "parameters": {
                     "type": "object",
                     "properties": {
@@ -267,7 +319,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         {
             "type": "function",
             "name": "top_k_endangered_in_municipality",
-            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type.",
+            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type. You can also use this to get all heritage sites in a municipality by entering k=-1 and any endangerment type",
             "parameters": {
                     "type": "object",
                     "properties": {
