@@ -82,4 +82,134 @@ describe("ChatSidebar", () => {
 		expect(secondCall?.[1]?.body).toContain('"useWebSearch":true');
 		expect(secondCall?.[1]?.body).toContain("What is happening near Ptuj?");
 	});
+
+	it("uses a multiline composer and only submits on Enter without Shift", async () => {
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: "mdml-gpt5-001",
+								label: "MDML-GPT5-001",
+								deployment: "MDML-GPT5-001",
+								available: true,
+								supportsWebSearch: true,
+								isDefault: true,
+								missingEnv: [],
+							},
+						],
+						defaultModelId: "mdml-gpt5-001",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						model: {
+							id: "mdml-gpt5-001",
+							label: "MDML-GPT5-001",
+							deployment: "MDML-GPT5-001",
+							available: true,
+							supportsWebSearch: true,
+							isDefault: true,
+							missingEnv: [],
+						},
+						message: {
+							role: "assistant",
+							content: "Multiline prompt received.",
+						},
+						citations: [],
+						webSearchUsed: false,
+						responseId: "resp_chat_2",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+		render(<ChatSidebar />);
+
+		await screen.findByRole("option", { name: "MDML-GPT5-001" });
+
+		const composer = screen.getByRole("textbox", { name: /ask the ai assistant about heritage risks/i });
+		expect(composer.tagName).toBe("TEXTAREA");
+
+		fireEvent.change(composer, {
+			target: { value: "Line one\nLine two" },
+		});
+		fireEvent.keyDown(composer, { key: "Enter", shiftKey: true });
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+
+		fireEvent.keyDown(composer, { key: "Enter" });
+
+		expect(await screen.findByText(/multiline prompt received/i)).toBeInTheDocument();
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+
+		const [, secondCall] = fetchMock.mock.calls;
+		expect(secondCall?.[1]?.body).toContain("Line one\\nLine two");
+	});
+
+	it("renders assistant html safely", async () => {
+		vi.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: "mdml-gpt5-001",
+								label: "MDML-GPT5-001",
+								deployment: "MDML-GPT5-001",
+								available: true,
+								supportsWebSearch: true,
+								isDefault: true,
+								missingEnv: [],
+							},
+						],
+						defaultModelId: "mdml-gpt5-001",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						model: {
+							id: "mdml-gpt5-001",
+							label: "MDML-GPT5-001",
+							deployment: "MDML-GPT5-001",
+							available: true,
+							supportsWebSearch: true,
+							isDefault: true,
+							missingEnv: [],
+						},
+						message: {
+							role: "assistant",
+							content:
+								'<p><strong>Important</strong> update for <a href="https://example.com/report">Ptuj</a>.</p><script>window.__chatSidebarInjected = true</script>',
+						},
+						citations: [],
+						webSearchUsed: false,
+						responseId: "resp_chat_3",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+		render(<ChatSidebar />);
+
+		await screen.findByRole("option", { name: "MDML-GPT5-001" });
+
+		fireEvent.change(screen.getByRole("textbox", { name: /ask the ai assistant about heritage risks/i }), {
+			target: { value: "Show formatted response" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+		const emphasis = await screen.findByText("Important");
+		expect(emphasis.tagName).toBe("STRONG");
+		expect(screen.getByRole("link", { name: "Ptuj" })).toHaveAttribute("href", "https://example.com/report");
+		expect(screen.queryByText(/__chatSidebarInjected/i)).not.toBeInTheDocument();
+	});
 });

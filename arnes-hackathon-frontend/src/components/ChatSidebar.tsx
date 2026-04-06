@@ -6,6 +6,7 @@ import {
 	fetchChatModels,
 	sendChatMessage,
 } from "@/lib/heritage-api";
+import SafeHtmlContent from "@/components/SafeHtmlContent";
 import { useLanguage } from "@/lib/i18n";
 import { Bot, RefreshCcw, Search, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +16,8 @@ const CHAT_MODEL_ID = "heritage-chat-model";
 const CHAT_WEB_SEARCH_ID = "heritage-chat-web-search";
 const CHAT_MODEL_STORAGE_KEY = "heritage-chat-model-id";
 const CHAT_WEB_SEARCH_STORAGE_KEY = "heritage-chat-web-search-enabled";
+const CHAT_INPUT_MIN_HEIGHT = 44;
+const CHAT_INPUT_MAX_HEIGHT = 160;
 
 interface UiMessage extends ChatMessage {
 	id: string;
@@ -41,6 +44,17 @@ const ChatSidebar = () => {
 	const [configError, setConfigError] = useState<string | null>(null);
 	const [requestError, setRequestError] = useState<string | null>(null);
 	const bottomRef = useRef<HTMLDivElement>(null);
+	const composerRef = useRef<HTMLTextAreaElement>(null);
+
+	const resizeComposer = (element: HTMLTextAreaElement) => {
+		element.style.height = "auto";
+		const nextHeight = Math.min(
+			Math.max(element.scrollHeight, CHAT_INPUT_MIN_HEIGHT),
+			CHAT_INPUT_MAX_HEIGHT,
+		);
+		element.style.height = `${nextHeight}px`;
+		element.style.overflowY = element.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? "auto" : "hidden";
+	};
 
 	useEffect(() => {
 		setMessages((prev) => {
@@ -53,6 +67,11 @@ const ChatSidebar = () => {
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: "smooth" });
 	}, [messages, loading]);
+
+	useEffect(() => {
+		if (!composerRef.current) return;
+		resizeComposer(composerRef.current);
+	}, [input]);
 
 	useEffect(() => {
 		if (typeof window === "undefined") return;
@@ -277,7 +296,11 @@ const ChatSidebar = () => {
 								msg.role === "user" ? "bg-chat-user text-primary-foreground" : "bg-chat-bg text-foreground"
 							}`}
 						>
-							<p className="whitespace-pre-wrap break-words">{msg.content}</p>
+							{msg.role === "assistant" ? (
+								<SafeHtmlContent content={msg.content} />
+							) : (
+								<p className="whitespace-pre-wrap break-words">{msg.content}</p>
+							)}
 							{msg.webSearchUsed && (
 								<p className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">
 									{m.chat.webSearchUsed}
@@ -327,25 +350,35 @@ const ChatSidebar = () => {
 				<label htmlFor={CHAT_INPUT_ID} className="sr-only">
 					{m.chat.inputLabel}
 				</label>
-				<div className="flex gap-2">
-					<input
-						id={CHAT_INPUT_ID}
-						name="assistantPrompt"
-						type="text"
-						value={input}
-						onChange={(event) => setInput(event.target.value)}
-						onKeyDown={(event) => event.key === "Enter" && handleSend()}
-						placeholder={m.chat.inputPlaceholder}
-						aria-label={m.chat.inputLabel}
-						disabled={!availableModels.length}
-						className="flex-1 rounded-md bg-secondary px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring disabled:opacity-50"
-					/>
+				<div className="flex items-end gap-2">
+					<div className="flex-1 overflow-hidden rounded-md bg-secondary focus-within:ring-1 focus-within:ring-ring">
+						<textarea
+							ref={composerRef}
+							id={CHAT_INPUT_ID}
+							name="assistantPrompt"
+							rows={1}
+							value={input}
+							onChange={(event) => {
+								setInput(event.target.value);
+								resizeComposer(event.target);
+							}}
+							onKeyDown={(event) => {
+								if (event.key !== "Enter" || event.shiftKey) return;
+								event.preventDefault();
+								void handleSend();
+							}}
+							placeholder={m.chat.inputPlaceholder}
+							aria-label={m.chat.inputLabel}
+							disabled={!availableModels.length}
+							className="block max-h-40 min-h-[44px] w-full resize-none bg-transparent px-3 py-2 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50"
+						/>
+					</div>
 					<button
 						type="button"
 						onClick={handleSend}
 						disabled={!canSend}
 						aria-label={m.chat.sendMessageAria}
-						className="rounded-md bg-primary p-2 text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+						className="self-end rounded-md bg-primary p-2 text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
 					>
 						<Send className="h-4 w-4" aria-hidden="true" />
 					</button>

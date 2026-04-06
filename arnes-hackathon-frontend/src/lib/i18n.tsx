@@ -321,7 +321,7 @@ type WidenLiterals<T> = T extends string
         ? { readonly [K in keyof T]: WidenLiterals<T[K]> }
         : T;
 
-type MessageBundle = WidenLiterals<(typeof messages)["en"]>;
+export type MessageBundle = WidenLiterals<(typeof messages)["en"]>;
 
 interface LanguageContextValue {
     language: Language;
