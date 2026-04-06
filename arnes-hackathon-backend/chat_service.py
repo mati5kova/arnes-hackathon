@@ -7,6 +7,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 import chromadb
+from openai import AzureOpenAI
 
 from dotenv import load_dotenv
 
@@ -24,7 +25,15 @@ CHAT_USAGE_SUMMARY_FILE = Path(
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
 ACTIVE_MODEL_ENV_PREFIX = os.getenv("CHAT_ACTIVE_MODEL_ENV_PREFIX", "CHAT_MODEL_MDML_GPT4O_MINI_001")
 
-EMBED_MODEL='text-embedding-3-small'
+EMBED_MODEL=os.getenv("MDML-TextEmbedding-003_DEPLOYMENT")
+chroma_client = chromadb.PersistentClient(path="AI/Data/chroma_db")
+collection = chroma_client.get_or_create_collection(name="kulturna_dediscina")
+
+embed_client = AzureOpenAI(
+    api_key=os.getenv("MDML-TextEmbedding-003_API_KEY"),
+    azure_endpoint=os.getenv("MDML-TextEmbedding-003_BASE_URL"),
+    api_version="2024-02-01",
+)
 
 SYSTEM_PROMPT = (
     """You are KULTURKO, a concise assistant for Slovenian cultural heritage risk data.
@@ -184,11 +193,13 @@ def dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         return top_k_endangered_in_municipality(**args)
     if name == "get_info_by_eid":
         return get_info_by_eid(**args)
-    raise ValueError(f"Unknown tool: {name}")
+    if name == "search_heritage_records":
+        return search_heritage_records(**args)
+    raise ValueError(f"Unknown tool: {  name}")
 
 
 def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {"flood_danger_revised", "fire_danger_revised", "landslide_danger_revised", "earthquake_danger_revised"}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -206,7 +217,7 @@ def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> l
     return ranked["EID"].astype(str).tolist()
 
 def top_k_endangered_in_municipality(obcina: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {"flood_danger_revised", "fire_danger_revised", "landslide_danger_revised", "earthquake_danger_revised"}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -238,12 +249,8 @@ def get_info_by_eid(eid: str, columns: list[str] | None = None) -> dict[str, Any
 
     return _json_safe(row.to_dict())
 
-
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
-collection = chroma_client.get_or_create_collection(name="monuments")
-
 def search_heritage_records(query: str, k: int = 5):
-    query_emb = embedClient.embeddings.create(
+    query_emb = embed_client.embeddings.create(
         model=EMBED_MODEL,
         input=[query]
     ).data[0].embedding
@@ -254,7 +261,7 @@ def search_heritage_records(query: str, k: int = 5):
     query_args = {
         "query_embeddings": [query_emb],
         "n_results": k,
-        "inlcude":['ids', 'metadata']
+        "include":["documents", "metadatas"]
         }
     
     if where:
@@ -262,7 +269,8 @@ def search_heritage_records(query: str, k: int = 5):
     
     result = collection.query(**query_args)
     #results->dict z moznimi: "ids", "metadatas", "documents"(text ki je bil embeddan)
-    return result.pop('documents', None)
+    print(result)
+    return result
 
 
 def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
@@ -279,7 +287,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                 "properties":{
                     "query":{
                         "type":"string",
-                        "description":"users querry to do semantic search on"
+                        "description":"users querry to do semantic search on. Usually something that is semantically similar to what you are looking for like the users prompt itself"
                     },
                     "k":{
                         "type":"integer",
@@ -305,7 +313,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ["flood_danger_revised", "fire_danger_revised", "landslide_danger_revised", "earthquake_danger_revised"],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
                         },
                         "k": {
                             "type": "integer",
@@ -329,7 +337,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ["flood_danger_revised", "fire_danger_revised", "landslide_danger_revised", "earthquake_danger_revised"],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
                         },
                         "k": {
                             "type": "integer",
@@ -352,8 +360,8 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                             "type": "array",
                             "items": {
                                 "type": "string",
-                                "enum": ["ESD", "EID", "IME", "SINONIMI", "OPIS", "ZVRST", "TIP", "GESLA", "DATACIJA", "LOKACIJAOPIS", "OBCINA", "ZAVOD", "SPOMENIK", "poplave", "pozar", "plazovi", "regija", "UE_UIME", "potres", "predominant_material",
-                                          "fire_danger_revised", "flood_danger_revised", "earthquake_danger_revised", "landslide_danger_revised", "danger_revision_reasoning"]
+                                "enum": ["ESD", "EID", "IME", "SINONIMI", "OPIS", "ZVRST", "TIP", "GESLA", "DATACIJA", "LOKACIJAOPIS", "OBCINA", "ZAVOD", "SPOMENIK", "poplave", "pozar", "plazovi", "regija", "UE_UIME", "potres", "prevladujoci_material",
+                                          'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', "danger_revision_reasoning"]
                                 },
                             "description": "Columns to show"
                         },
