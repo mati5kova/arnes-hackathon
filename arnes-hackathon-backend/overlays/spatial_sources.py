@@ -467,6 +467,23 @@ def compute_ring_bounds(ring: list[tuple[float, float]]) -> list[float] | None:
     return [min_lng, min_lat, max_lng, max_lat]
 
 
+def compute_path_bounds(path: list[tuple[float, float]]) -> list[float] | None:
+    if len(path) < 2:
+        return None
+
+    lngs = [point[0] for point in path]
+    lats = [point[1] for point in path]
+    min_lng = min(lngs)
+    max_lng = max(lngs)
+    min_lat = min(lats)
+    max_lat = max(lats)
+
+    if not (-180 <= min_lng <= 180 and -180 <= max_lng <= 180 and -90 <= min_lat <= 90 and -90 <= max_lat <= 90):
+        return None
+
+    return [min_lng, min_lat, max_lng, max_lat]
+
+
 def bounds_intersect(left: list[float], right: list[float]) -> bool:
     left_min_lng, left_min_lat, left_max_lng, left_max_lat = left
     right_min_lng, right_min_lat, right_max_lng, right_max_lat = right
@@ -491,6 +508,17 @@ def simplify_ring(ring: list[tuple[float, float]], *, tolerance: float) -> list[
 
     if len(simplified) < 4:
         return ring
+
+    return simplified
+
+
+def simplify_path(path: list[tuple[float, float]], *, tolerance: float) -> list[tuple[float, float]]:
+    if len(path) < 3 or tolerance <= 0:
+        return path
+
+    simplified = rdp(path, tolerance)
+    if len(simplified) < 2:
+        return path
 
     return simplified
 
@@ -605,6 +633,252 @@ def read_polygon_shapefile_records(path: Path) -> list[dict[str, Any]]:
         )
 
     return records
+
+
+def read_polyline_shapefile_index(path: Path, *, id_prefix: str) -> list[dict[str, Any]]:
+    if not path.is_file():
+        raise RuntimeError(f"Shapefile missing: {path}")
+
+    with path.open("rb") as handle:
+        header = handle.read(100)
+        if len(header) < 100:
+            return []
+
+        shape_type = struct.unpack("<i", header[32:36])[0]
+        if shape_type not in {3, 13, 23}:
+            raise RuntimeError(f"Unsupported shape type {shape_type} in {path}")
+
+        records: list[dict[str, Any]] = []
+
+        while True:
+            record_header_offset = handle.tell()
+            record_header = handle.read(8)
+            if not record_header:
+                break
+            if len(record_header) < 8:
+                break
+
+            _, content_length_words = struct.unpack(">2i", record_header)
+            content_length = content_length_words * 2
+            content_offset = record_header_offset + 8
+            content_head = handle.read(min(content_length, 44))
+
+            if len(content_head) >= 44:
+                record_shape_type = struct.unpack("<i", content_head[:4])[0]
+                if record_shape_type in {3, 13, 23}:
+                    xmin, ymin, xmax, ymax = struct.unpack("<4d", content_head[4:36])
+                    corners = [
+                        maybe_transform_d96_to_wgs84(xmin, ymin),
+                        maybe_transform_d96_to_wgs84(xmax, ymax),
+                    ]
+                    lngs = [point[0] for point in corners]
+                    lats = [point[1] for point in corners]
+                    records.append(
+                        {
+                            "id": f"{id_prefix}:{len(records)}",
+                            "bounds": [min(lngs), min(lats), max(lngs), max(lats)],
+                            "contentOffset": content_offset,
+                            "contentLength": content_length,
+                        }
+                    )
+
+            remaining = content_length - len(content_head)
+            if remaining > 0:
+                handle.seek(remaining, 1)
+
+    return records
+
+
+def read_polyline_record_from_handle(
+    handle: Any,
+    *,
+    content_offset: int,
+    content_length: int,
+) -> list[list[tuple[float, float]]]:
+    handle.seek(content_offset)
+    content = handle.read(content_length)
+    if len(content) < 44:
+        return []
+
+    record_shape_type = struct.unpack("<i", content[:4])[0]
+    if record_shape_type == 0:
+        return []
+    if record_shape_type not in {3, 13, 23}:
+        return []
+
+    num_parts, num_points = struct.unpack("<2i", content[36:44])
+    parts_offset = 44
+    points_offset = parts_offset + 4 * num_parts
+    if len(content) < points_offset + 16 * num_points:
+        return []
+
+    part_indices = list(struct.unpack(f"<{num_parts}i", content[parts_offset:points_offset]))
+
+    points_xy: list[tuple[float, float]] = []
+    for point_index in range(num_points):
+        point_offset = points_offset + point_index * 16
+        x, y = struct.unpack("<2d", content[point_offset : point_offset + 16])
+        points_xy.append(maybe_transform_d96_to_wgs84(x, y))
+
+    paths: list[list[tuple[float, float]]] = []
+    for part_index, start in enumerate(part_indices):
+        end = part_indices[part_index + 1] if part_index + 1 < len(part_indices) else len(points_xy)
+        path = points_xy[start:end]
+        if len(path) >= 2:
+            paths.append(path)
+
+    return paths
+
+
+def select_visible_lines(
+    *,
+    line_path: Path,
+    records: list[dict[str, Any]],
+    bbox: list[float] | None,
+    zoom: int,
+    max_items: int,
+    line_index: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not records:
+        return {"lines": [], "in_view_count": 0}
+
+    if bbox:
+        candidates = select_bbox_candidates(areas=records, bbox=bbox, area_index=line_index)
+    else:
+        candidates = list(records)
+
+    if not candidates:
+        return {"lines": [], "in_view_count": 0}
+
+    in_view_count = len(candidates)
+    if len(candidates) > max_items:
+        candidates = spatially_sample_line_candidates(candidates, max_items=max_items, bbox=bbox)
+
+    tolerance = get_zoom_tolerance_deg(zoom)
+    cache_key = zoom
+    visible: list[dict[str, Any]] = []
+
+    with line_path.open("rb") as handle:
+        for record in candidates:
+            render_cache = record.setdefault("_render_cache", {})
+            cached_line = render_cache.get(cache_key)
+            if isinstance(cached_line, dict):
+                visible.append(cached_line)
+                continue
+
+            content_offset = int(record.get("contentOffset") or 0)
+            content_length = int(record.get("contentLength") or 0)
+            if content_offset <= 0 or content_length <= 0:
+                continue
+
+            raw_paths = read_polyline_record_from_handle(
+                handle,
+                content_offset=content_offset,
+                content_length=content_length,
+            )
+            simplified_paths: list[list[list[float]]] = []
+            line_bounds: list[float] | None = None
+
+            for raw_path in raw_paths:
+                simplified = simplify_path(raw_path, tolerance=tolerance)
+                bounds = compute_path_bounds(simplified)
+                if not bounds:
+                    continue
+                if bbox and not bounds_intersect(bounds, bbox):
+                    continue
+                simplified_paths.append([[round(point[0], 5), round(point[1], 5)] for point in simplified])
+                if line_bounds is None:
+                    line_bounds = bounds
+                else:
+                    line_bounds = [
+                        min(line_bounds[0], bounds[0]),
+                        min(line_bounds[1], bounds[1]),
+                        max(line_bounds[2], bounds[2]),
+                        max(line_bounds[3], bounds[3]),
+                    ]
+
+            if not simplified_paths or line_bounds is None:
+                continue
+
+            cached_line = {
+                "id": str(record.get("id") or f"line:{len(visible)}"),
+                "bounds": [round(value, 5) for value in line_bounds],
+                "paths": simplified_paths,
+            }
+            render_cache[cache_key] = cached_line
+            visible.append(cached_line)
+
+    return {"lines": visible, "in_view_count": in_view_count}
+
+
+def spatially_sample_line_candidates(
+    candidates: list[dict[str, Any]],
+    *,
+    max_items: int,
+    bbox: list[float] | None,
+) -> list[dict[str, Any]]:
+    if len(candidates) <= max_items:
+        return candidates
+    if max_items <= 0:
+        return []
+
+    view_bounds = bbox if bbox else compute_areas_bounds(candidates)
+    if not view_bounds:
+        ranked = sorted(candidates, key=line_importance_score, reverse=True)
+        return ranked[:max_items]
+
+    min_lng, min_lat, max_lng, max_lat = view_bounds
+    span_lng = max(max_lng - min_lng, 1e-9)
+    span_lat = max(max_lat - min_lat, 1e-9)
+
+    grid_side = clamp_int(int(math.sqrt(max_items * 0.8)), 10, 240)
+    buckets: dict[tuple[int, int], list[dict[str, Any]]] = {}
+
+    for candidate in candidates:
+        bounds = candidate.get("bounds")
+        if not isinstance(bounds, list) or len(bounds) != 4:
+            continue
+        center_lng = (float(bounds[0]) + float(bounds[2])) / 2.0
+        center_lat = (float(bounds[1]) + float(bounds[3])) / 2.0
+        grid_x = clamp_int(int((center_lng - min_lng) / span_lng * grid_side), 0, grid_side - 1)
+        grid_y = clamp_int(int((center_lat - min_lat) / span_lat * grid_side), 0, grid_side - 1)
+        buckets.setdefault((grid_x, grid_y), []).append(candidate)
+
+    if not buckets:
+        ranked = sorted(candidates, key=line_importance_score, reverse=True)
+        return ranked[:max_items]
+
+    for bucket in buckets.values():
+        bucket.sort(key=line_importance_score, reverse=True)
+
+    ordered_keys = sorted(buckets.keys(), key=lambda key: (key[1], key[0] if key[1] % 2 == 0 else -key[0]))
+    selected: list[dict[str, Any]] = []
+    depth = 0
+
+    while len(selected) < max_items:
+        appended = 0
+        for key in ordered_keys:
+            bucket = buckets[key]
+            if depth >= len(bucket):
+                continue
+            selected.append(bucket[depth])
+            appended += 1
+            if len(selected) >= max_items:
+                break
+        if appended == 0:
+            break
+        depth += 1
+
+    return selected[:max_items]
+
+
+def line_importance_score(candidate: dict[str, Any]) -> float:
+    bounds = candidate.get("bounds") or [0.0, 0.0, 0.0, 0.0]
+    width = max(0.0, float(bounds[2]) - float(bounds[0]))
+    height = max(0.0, float(bounds[3]) - float(bounds[1]))
+    bbox_diagonal = math.hypot(width, height)
+    content_length = float(candidate.get("contentLength") or 0.0)
+    return bbox_diagonal * 1000.0 + content_length
 
 
 def read_dbf_records(path: Path) -> list[dict[str, Any]]:

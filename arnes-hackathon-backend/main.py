@@ -120,6 +120,11 @@ class HeritageSiteSummary(BaseModel):
         description="Short textual description if available.",
         examples=["Baročna cerkev v jedru Spodnjih Pirnic."],
     )
+    elevationM: Optional[float] = Field(
+        default=None,
+        description="Site elevation in meters when available from enriched spatial data.",
+        examples=[337.41],
+    )
     isCluster: Optional[bool] = Field(
         default=None,
         description="True when this item is a synthetic cluster marker (not a single site).",
@@ -286,6 +291,20 @@ class OverlayArea(BaseModel):
     )
 
 
+class OverlayLine(BaseModel):
+    id: str = Field(description="Stable line identifier.", examples=["river:1028"])
+    bounds: List[float] = Field(
+        description="Line bounds in format [minLng,minLat,maxLng,maxLat].",
+        min_length=4,
+        max_length=4,
+        examples=[[14.1225, 46.0125, 14.245, 46.088]],
+    )
+    paths: List[List[List[float]]] = Field(
+        description="One or more line paths in [lng,lat] coordinate pairs.",
+        examples=[[[[14.12, 46.01], [14.14, 46.02], [14.16, 46.03]]]],
+    )
+
+
 class OverlayGridResponse(BaseModel):
     kind: str = Field(description="Overlay key identifier.", examples=["fire"])
     label: str = Field(description="Display label for active overlay.", examples=["Fire danger"])
@@ -293,6 +312,7 @@ class OverlayGridResponse(BaseModel):
     scale: OverlayScale = Field(description="Legend/scale metadata.")
     areas: List[OverlayArea] = Field(description="Viewport-optimized hazard polygons for area overlays.")
     cells: List[OverlayCell] = Field(description="Viewport-optimized grid cells for point-based overlays.")
+    lines: List[OverlayLine] = Field(description="Viewport-optimized polyline features for line-based overlays.")
     sampleCount: int = Field(description="Number of rendered source items represented in current viewport.", examples=[1420])
     totalAvailableSamples: int = Field(description="Total source items available for this overlay.", examples=[31086])
     gridCellSizeDeg: float = Field(description="Final aggregation cell size in degrees (0 for area overlays).", examples=[0.0214, 0.0])

@@ -13,7 +13,7 @@ By default it runs fully from local files (no dependency on OPSI/network).
 - `GET /api/heritage-sites?bbox=minLng,minLat,maxLng,maxLat&zoom=8` (clustered map points)
 - `GET /api/heritage-sites/{site_id}`
 - `GET /api/overlays` (available overlay catalog)
-- `GET /api/overlays/{kind}?bbox=...&zoom=...` (`kind` = `fire|flood|air|landslide`, backend-aggregated for rendering performance; heavy area overlays switch to low-zoom grid cells for faster delivery)
+- `GET /api/overlays/{kind}?bbox=...&zoom=...` (`kind` = `fire|flood|air|landslide|river`, backend-aggregated for rendering performance; heavy area overlays switch to low-zoom grid cells for faster delivery, while `river` returns viewport-clipped linework)
 
 ### FastAPI Docs
 
@@ -38,6 +38,28 @@ Run the backend:
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8787 --reload
 ```
+
+## Required Local River Data
+
+The river overlay and the flood-enrichment pipeline expect the official DRSV hydrography dataset to be present locally at:
+
+```bash
+arnes-hackathon-backend/AI/Data_Processing/DRSV_HIDRO5_LIN_PV/
+```
+
+This folder is intentionally ignored by Git because the extracted shapefile set is too large for the repository.
+
+Download the archive from one of these official links:
+
+- [DRSV_HIDRO5_LIN_PV.zip](https://www.statika.evode.gov.si/fileadmin/vodkat/DRSV_HIDRO5_LIN_PV.zip)
+- [podatki.gov.si resource page](https://podatki.gov.si/dataset/obmocne-enote-direkcije-rs-za-vode/resource/108f0bdc-19a4-4e78-bf4b-45880fabdebb)
+
+After downloading, extract the archive so files such as `HIDRO5_LIN_PV_TIPTV1_2.shp`, `.dbf`, `.shx`, and related sidecar files live directly inside that directory.
+
+If this dataset is missing:
+
+- the `river` map overlay will not work
+- regenerating `AI/Data/kd_z_nevarnost_enriched_verified.geojson` will fail
 
 ## Tests
 

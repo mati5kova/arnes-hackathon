@@ -417,6 +417,14 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
     )
     municipality = string_value(pick_first(source_with_geometry, ["obcina", "municipality", "upravna_enota", "naselje", "lokacija", "kraj"]))
     description = string_value(pick_first(source_with_geometry, ["opis", "kratki_opis", "description", "summary", "povzetek"]))
+    elevation_m = to_number(
+        string_value(
+            pick_first(
+                source_with_geometry,
+                ["z", "elevation", "elevation_m", "visina", "visina_m", "height", "height_m"],
+            )
+        )
+    )
     site_id = string_value(registry_id) or f"{name}-{coordinates['lat']:.6f}-{coordinates['lng']:.6f}".lower()
 
     used_key_candidates = [
@@ -528,6 +536,7 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
         "protectionStatus": protection_status or None,
         "municipality": municipality or None,
         "description": description or None,
+        "elevationM": round(float(elevation_m), 2) if elevation_m is not None else None,
         "detailFields": detail_fields,
         "searchNameNormalized": name_normalized,
         "searchMunicipalityNormalized": municipality_normalized,
@@ -549,6 +558,7 @@ def to_summary(site: dict[str, Any]) -> dict[str, Any]:
         "protectionStatus": site.get("protectionStatus"),
         "municipality": site.get("municipality"),
         "description": site.get("description"),
+        "elevationM": site.get("elevationM"),
         "isCluster": site.get("isCluster"),
         "clusterCount": site.get("clusterCount"),
     }

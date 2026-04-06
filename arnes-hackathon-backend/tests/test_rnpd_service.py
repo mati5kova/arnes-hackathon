@@ -146,6 +146,20 @@ def test_normalize_record_caps_detail_fields_to_30():
     assert len(normalized["detailFields"]) == 30
 
 
+def test_normalize_record_extracts_explicit_elevation():
+    record = {
+        "id": "EID-2",
+        "name": "Elevated Site",
+        "lat": 46.1234,
+        "lng": 14.5678,
+        "z": "412.58",
+    }
+
+    normalized = normalize_record(record, 0)
+    assert normalized is not None
+    assert normalized["elevationM"] == 412.58
+
+
 def test_score_search_match_suppresses_short_detail_only_queries():
     site = {
         "searchNameNormalized": "",
