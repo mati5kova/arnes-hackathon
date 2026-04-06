@@ -67,7 +67,13 @@ function normalizeBbox(rawBbox: string | null): string | null {
 function parseOverlayKind(rawOverlay: string | null): OverlayKind | null {
 	if (!rawOverlay) return null;
 	const normalized = rawOverlay.trim().toLowerCase();
-	if (normalized === "fire" || normalized === "flood" || normalized === "air" || normalized === "landslide") {
+	if (
+		normalized === "fire" ||
+		normalized === "flood" ||
+		normalized === "air" ||
+		normalized === "landslide" ||
+		normalized === "river"
+	) {
 		return normalized;
 	}
 	return null;

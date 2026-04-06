@@ -1,4 +1,4 @@
-export type OverlayKind = "fire" | "flood" | "air" | "landslide";
+export type OverlayKind = "fire" | "flood" | "air" | "landslide" | "river";
 
 export interface OverlayCatalogItem {
     kind: OverlayKind;
@@ -41,6 +41,12 @@ export interface OverlayArea {
     ring: [number, number][];
 }
 
+export interface OverlayLine {
+    id: string;
+    bounds: [number, number, number, number];
+    paths: [number, number][][];
+}
+
 export interface OverlayGridResponse {
     kind: OverlayKind;
     label: string;
@@ -48,6 +54,7 @@ export interface OverlayGridResponse {
     scale: OverlayScale;
     areas: OverlayArea[];
     cells: OverlayCell[];
+    lines: OverlayLine[];
     sampleCount: number;
     totalAvailableSamples: number;
     gridCellSizeDeg: number;

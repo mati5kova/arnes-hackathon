@@ -39,6 +39,39 @@ export interface ApiHealthStatus {
 	datasetSourceCount?: number;
 }
 
+export interface ChatModelDescriptor {
+	id: string;
+	label: string;
+	deployment: string;
+	available: boolean;
+	supportsWebSearch: boolean;
+	isDefault: boolean;
+	missingEnv: string[];
+}
+
+export interface ChatModelsResponse {
+	items: ChatModelDescriptor[];
+	defaultModelId: string;
+}
+
+export interface ChatMessage {
+	role: "user" | "assistant";
+	content: string;
+}
+
+export interface ChatCitation {
+	title: string;
+	url: string;
+}
+
+export interface ChatResponse {
+	model: ChatModelDescriptor;
+	message: ChatMessage;
+	citations: ChatCitation[];
+	webSearchUsed: boolean;
+	responseId: string;
+}
+
 export async function fetchHeritageSites(options: ListOptions = {}): Promise<HeritageSiteListResponse> {
 	const searchParams = new URLSearchParams();
 
@@ -68,6 +101,48 @@ export async function fetchHeritageSite(siteId: string, signal?: AbortSignal): P
 
 export async function fetchApiHealth(signal?: AbortSignal): Promise<ApiHealthStatus> {
 	return fetchJson<ApiHealthStatus>("/api/health", signal);
+}
+
+export async function fetchChatModels(signal?: AbortSignal): Promise<ChatModelsResponse> {
+	return fetchJson<ChatModelsResponse>("/api/chat/models", signal);
+}
+
+export async function sendChatMessage(
+	payload: {
+		messages: ChatMessage[];
+		modelId: string;
+		useWebSearch: boolean;
+	},
+	signal?: AbortSignal,
+): Promise<ChatResponse> {
+	const response = await fetch(`${API_BASE_URL}/api/chat`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(payload),
+		signal,
+	});
+
+	if (!response.ok) {
+		let detail: string | undefined;
+		try {
+			const errorPayload = await response.json();
+			if (
+				errorPayload &&
+				typeof errorPayload === "object" &&
+				"detail" in errorPayload &&
+				typeof errorPayload.detail === "string"
+			) {
+				detail = errorPayload.detail;
+			}
+		} catch {
+			// Best effort only.
+		}
+		throw new ApiError(response.status, "/api/chat", detail);
+	}
+
+	return (await response.json()) as ChatResponse;
 }
 
 interface OverlayOptions {

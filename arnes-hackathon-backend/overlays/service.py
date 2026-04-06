@@ -15,8 +15,10 @@ from .spatial_sources import (
     load_fire_geojson_areas,
     load_flood_shapefile_areas,
     load_landslide_shapefile_areas,
+    read_polyline_shapefile_index,
     select_bbox_candidates,
     select_visible_areas,
+    select_visible_lines,
 )
 
 try:
@@ -58,11 +60,16 @@ OVERLAY_LANDSLIDE_DBF = os.getenv(
     "OVERLAY_LANDSLIDE_DBF",
     str(BASE_DIR / "AI" / "Data_Processing" / "DRSV_Opk_Plazovi_skupna" / "plazovi2.dbf"),
 )
+OVERLAY_RIVER_LINE_SHP = os.getenv(
+    "OVERLAY_RIVER_LINE_SHP",
+    str(BASE_DIR / "AI" / "Data_Processing" / "DRSV_HIDRO5_LIN_PV" / "HIDRO5_LIN_PV_TIPTV1_2.shp"),
+)
 OVERLAY_CACHE_TTL_MS = int(os.getenv("OVERLAY_CACHE_TTL_MS", str(1000 * 60 * 30)))
 # Absolute backend safety cap. Runtime target is still zoom-adaptive and usually lower.
 OVERLAY_MAX_GRID_CELLS = max(256, int(os.getenv("OVERLAY_MAX_GRID_CELLS", "7500")))
 OVERLAY_MAX_AREA_ITEMS = max(1200, int(os.getenv("OVERLAY_MAX_AREA_ITEMS", "32000")))
 OVERLAY_MAX_AREA_GRID_CELLS = max(320, int(os.getenv("OVERLAY_MAX_AREA_GRID_CELLS", "4200")))
+OVERLAY_MAX_LINE_ITEMS = max(800, int(os.getenv("OVERLAY_MAX_LINE_ITEMS", "5000")))
 OVERLAY_AREA_GRID_MIN_ZOOM = max(3, int(os.getenv("OVERLAY_AREA_GRID_MIN_ZOOM", "3")))
 OVERLAY_AREA_GRID_MAX_ZOOM = min(18, max(OVERLAY_AREA_GRID_MIN_ZOOM, int(os.getenv("OVERLAY_AREA_GRID_MAX_ZOOM", "11"))))
 OVERLAY_AREA_GRID_KINDS = frozenset(
@@ -102,6 +109,13 @@ OVERLAY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "scoreMin": 1.0,
         "scoreMax": 4.0,
     },
+    "river": {
+        "label": "Rivers",
+        "description": "Official DRSV hydrography line network for watercourses and major channels.",
+        "mode": "line",
+        "scoreMin": 0.0,
+        "scoreMax": 0.0,
+    },
 }
 
 _SCALE_STEPS = [
@@ -119,6 +133,8 @@ overlay_cache: dict[str, Any] = {
     "points_by_kind": {kind: [] for kind in OVERLAY_DEFINITIONS},
     "areas_by_kind": {kind: [] for kind in OVERLAY_DEFINITIONS},
     "area_index_by_kind": {kind: None for kind in OVERLAY_DEFINITIONS},
+    "line_source_by_kind": {kind: None for kind in OVERLAY_DEFINITIONS},
+    "line_index_by_kind": {kind: None for kind in OVERLAY_DEFINITIONS},
     "source_meta": {
         "hazard_file": OVERLAY_HAZARD_FILE,
         "air_file": OVERLAY_AIR_FILE,
@@ -128,6 +144,7 @@ overlay_cache: dict[str, Any] = {
         "flood_very_rare_shp": OVERLAY_FLOOD_VERY_RARE_SHP,
         "landslide_shp": OVERLAY_LANDSLIDE_SHP,
         "landslide_dbf": OVERLAY_LANDSLIDE_DBF,
+        "river_line_shp": OVERLAY_RIVER_LINE_SHP,
     },
 }
 overlay_view_cache: OrderedDict[tuple[Any, ...], dict[str, Any]] = OrderedDict()
@@ -202,7 +219,8 @@ def list_overlay_grid(
             total_available = len(areas)
             cells = []
             cell_size_deg = 0.0
-    else:
+        visible_lines = []
+    elif overlay_mode == "point_grid":
         points = dataset["points_by_kind"].get(kind, [])
         aggregated = aggregate_points_to_grid(
             points=points,
@@ -216,6 +234,36 @@ def list_overlay_grid(
         total_available = len(points)
         cells = aggregated["cells"]
         cell_size_deg = aggregated["cell_size_deg"]
+        visible_lines = []
+    else:
+        line_source_by_kind = dataset.get("line_source_by_kind")
+        line_index_by_kind = dataset.get("line_index_by_kind")
+        line_source = line_source_by_kind.get(kind) if isinstance(line_source_by_kind, dict) else None
+        line_index = line_index_by_kind.get(kind) if isinstance(line_index_by_kind, dict) else None
+        records = line_source.get("records") if isinstance(line_source, dict) else []
+        line_path_value = line_source.get("path") if isinstance(line_source, dict) else None
+        if not isinstance(records, list) or not line_path_value:
+            visible_lines = []
+            sample_count = 0
+            total_available = 0
+        else:
+            selection = select_visible_lines(
+                line_path=Path(str(line_path_value)),
+                records=records,
+                bbox=bbox,
+                zoom=zoom_int,
+                max_items=get_target_max_line_items(zoom_int),
+                line_index=line_index,
+            )
+            visible_lines = selection["lines"]
+            sample_count = int(selection["in_view_count"])
+            total_available = len(records)
+        visible_areas = []
+        cells = []
+        cell_size_deg = 0.0
+
+    if overlay_mode != "line":
+        visible_lines = []
 
     payload = {
         "kind": kind,
@@ -229,6 +277,7 @@ def list_overlay_grid(
         },
         "areas": visible_areas,
         "cells": cells,
+        "lines": visible_lines,
         "sampleCount": sample_count,
         "totalAvailableSamples": total_available,
         "gridCellSizeDeg": cell_size_deg,
@@ -243,11 +292,17 @@ def get_overlay_dataset(*, refresh: bool = False) -> dict[str, Any]:
         loaded_ms = float(overlay_cache.get("loaded_at") or 0.0)
         is_fresh = (time() * 1000 - loaded_ms) < OVERLAY_CACHE_TTL_MS
         if not refresh and is_fresh and has_any_overlay_data(
-            overlay_cache.get("points_by_kind"), overlay_cache.get("areas_by_kind")
+            overlay_cache.get("points_by_kind"),
+            overlay_cache.get("areas_by_kind"),
+            overlay_cache.get("line_source_by_kind"),
         ):
             return overlay_cache
         if overlay_cache.get("loading"):
-            if has_any_overlay_data(overlay_cache.get("points_by_kind"), overlay_cache.get("areas_by_kind")):
+            if has_any_overlay_data(
+                overlay_cache.get("points_by_kind"),
+                overlay_cache.get("areas_by_kind"),
+                overlay_cache.get("line_source_by_kind"),
+            ):
                 return overlay_cache
             raise RuntimeError("Overlay dataset loading in progress")
         overlay_cache["loading"] = True
@@ -256,6 +311,7 @@ def get_overlay_dataset(*, refresh: bool = False) -> dict[str, Any]:
     try:
         points_by_kind = load_overlay_points()
         areas_by_kind = load_overlay_areas()
+        line_source_by_kind = load_overlay_lines()
         loaded_at_ms = time() * 1000
         snapshot = {
             "loaded_at": loaded_at_ms,
@@ -264,6 +320,15 @@ def get_overlay_dataset(*, refresh: bool = False) -> dict[str, Any]:
             "points_by_kind": points_by_kind,
             "areas_by_kind": areas_by_kind,
             "area_index_by_kind": {kind: build_area_spatial_index(areas) for kind, areas in areas_by_kind.items()},
+            "line_source_by_kind": line_source_by_kind,
+            "line_index_by_kind": {
+                kind: (
+                    build_area_spatial_index(source["records"])
+                    if isinstance(source, dict) and isinstance(source.get("records"), list) and source["records"]
+                    else None
+                )
+                for kind, source in line_source_by_kind.items()
+            },
             "source_meta": {
                 "hazard_file": OVERLAY_HAZARD_FILE,
                 "air_file": OVERLAY_AIR_FILE,
@@ -273,6 +338,7 @@ def get_overlay_dataset(*, refresh: bool = False) -> dict[str, Any]:
                 "flood_very_rare_shp": OVERLAY_FLOOD_VERY_RARE_SHP,
                 "landslide_shp": OVERLAY_LANDSLIDE_SHP,
                 "landslide_dbf": OVERLAY_LANDSLIDE_DBF,
+                "river_line_shp": OVERLAY_RIVER_LINE_SHP,
             },
         }
         with overlay_cache_lock:
@@ -283,7 +349,11 @@ def get_overlay_dataset(*, refresh: bool = False) -> dict[str, Any]:
         with overlay_cache_lock:
             overlay_cache["loading"] = False
             overlay_cache["last_error"] = str(exc)
-            if has_any_overlay_data(overlay_cache.get("points_by_kind"), overlay_cache.get("areas_by_kind")):
+            if has_any_overlay_data(
+                overlay_cache.get("points_by_kind"),
+                overlay_cache.get("areas_by_kind"),
+                overlay_cache.get("line_source_by_kind"),
+            ):
                 return dict(overlay_cache)
         raise RuntimeError(f"Unable to load overlay data: {exc}") from exc
 
@@ -306,8 +376,22 @@ def has_any_overlay_areas(areas_by_kind: Any) -> bool:
     return False
 
 
-def has_any_overlay_data(points_by_kind: Any, areas_by_kind: Any) -> bool:
-    return has_any_overlay_points(points_by_kind) or has_any_overlay_areas(areas_by_kind)
+def has_any_overlay_lines(line_source_by_kind: Any) -> bool:
+    if not isinstance(line_source_by_kind, dict):
+        return False
+    for source in line_source_by_kind.values():
+        records = source.get("records") if isinstance(source, dict) else None
+        if isinstance(records, list) and records:
+            return True
+    return False
+
+
+def has_any_overlay_data(points_by_kind: Any, areas_by_kind: Any, line_source_by_kind: Any) -> bool:
+    return (
+        has_any_overlay_points(points_by_kind)
+        or has_any_overlay_areas(areas_by_kind)
+        or has_any_overlay_lines(line_source_by_kind)
+    )
 
 
 def load_overlay_points() -> dict[str, list[tuple[float, float, float]]]:
@@ -385,6 +469,25 @@ def load_overlay_areas() -> dict[str, list[dict[str, Any]]]:
         areas.sort(key=lambda area: (int(area["level"]), str(area["id"])))
 
     return areas_by_kind
+
+
+def load_overlay_lines() -> dict[str, dict[str, Any] | None]:
+    line_source_by_kind: dict[str, dict[str, Any] | None] = {kind: None for kind in OVERLAY_DEFINITIONS}
+
+    river_path = Path(OVERLAY_RIVER_LINE_SHP)
+    river_records: list[dict[str, Any]] = []
+    if river_path.is_file():
+        river_records = read_polyline_shapefile_index(
+            river_path,
+            id_prefix="river",
+        )
+        river_records.sort(key=lambda record: str(record["id"]))
+    line_source_by_kind["river"] = {
+        "path": OVERLAY_RIVER_LINE_SHP,
+        "records": river_records,
+    }
+
+    return line_source_by_kind
 
 
 def build_view_cache_key(
@@ -833,6 +936,12 @@ def get_target_max_area_items(zoom: int) -> int:
     # Keep area overlays rich while reducing payload and render pressure at low zoom.
     zoom_adaptive_target = 4000 + max(0, zoom - 6) * 1700
     return clamp_int(zoom_adaptive_target, 2200, OVERLAY_MAX_AREA_ITEMS)
+
+
+def get_target_max_line_items(zoom: int) -> int:
+    # River lines stay readable at overview zooms while allowing denser detail when zoomed in.
+    zoom_adaptive_target = 1800 + max(0, zoom - 6) * 420
+    return clamp_int(zoom_adaptive_target, 1200, OVERLAY_MAX_LINE_ITEMS)
 
 
 def infer_area_bounds(*, areas: list[dict[str, Any]], area_index: dict[str, Any] | None) -> list[float] | None:

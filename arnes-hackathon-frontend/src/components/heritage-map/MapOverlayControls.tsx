@@ -3,14 +3,14 @@ import type { OverlayKind, OverlayScale } from "@/types/overlays";
 import { Layers } from "lucide-react";
 import { OVERLAY_SCALE_GRADIENT } from "./overlay-style";
 
-const OVERLAY_OPTIONS: OverlayKind[] = ["fire", "flood", "air", "landslide"];
+const OVERLAY_OPTIONS: OverlayKind[] = ["fire", "flood", "air", "landslide", "river"];
 
 interface MapOverlayControlsProps {
 	activeOverlay: OverlayKind | null;
 	activeOverlayLabel?: string;
 	activeScale?: OverlayScale;
 	renderedItemCount?: number;
-	renderedItemUnit?: "areas" | "cells";
+	renderedItemUnit?: "areas" | "cells" | "lines";
 	sampleCount?: number;
 	loading: boolean;
 	hasError: boolean;
@@ -31,6 +31,7 @@ const MapOverlayControls = ({
 	const { m } = useLanguage();
 	const leastLabel = activeScale?.leastLabel || m.map.overlay.leastLabel;
 	const mostLabel = activeScale?.mostLabel || m.map.overlay.mostLabel;
+	const showScale = activeOverlay !== "river";
 
 	return (
 		<div className="absolute right-4 top-3 z-[10] w-[16.5rem] rounded-lg border border-border bg-card/95 p-3 shadow-lg backdrop-blur-sm">
@@ -65,20 +66,28 @@ const MapOverlayControls = ({
 			<div className="mt-3 rounded-md border border-border/70 bg-background/85 px-2 py-2">
 				<div className="mb-1 text-[11px] font-medium text-foreground" role="status" aria-live="polite">
 					{activeOverlay
-						? `${activeOverlayLabel || m.map.overlay.options[activeOverlay]} ${m.map.overlay.scaleSuffix}`
+						? showScale
+							? `${activeOverlayLabel || m.map.overlay.options[activeOverlay]} ${m.map.overlay.scaleSuffix}`
+							: activeOverlayLabel || m.map.overlay.options[activeOverlay]
 						: m.map.overlay.noneActive}
 				</div>
-				<div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
-					<span>{leastLabel}</span>
-					<span>{mostLabel}</span>
-				</div>
-				<div
-					className="mt-1 h-1.5 rounded-full"
-					style={{
-						backgroundImage: OVERLAY_SCALE_GRADIENT,
-						opacity: activeOverlay ? 1 : 0.35,
-					}}
-				/>
+				{showScale ? (
+					<>
+						<div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
+							<span>{leastLabel}</span>
+							<span>{mostLabel}</span>
+						</div>
+						<div
+							className="mt-1 h-1.5 rounded-full"
+							style={{
+								backgroundImage: OVERLAY_SCALE_GRADIENT,
+								opacity: activeOverlay ? 1 : 0.35,
+							}}
+						/>
+					</>
+				) : (
+					<div className="text-[11px] text-muted-foreground">{m.map.overlay.riverNote}</div>
+				)}
 			</div>
 
 			{loading && <div className="mt-2 text-xs text-muted-foreground">{m.map.overlay.loading}</div>}
