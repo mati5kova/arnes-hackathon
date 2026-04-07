@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -10,6 +11,7 @@ import chromadb
 from openai import AzureOpenAI
 
 from dotenv import load_dotenv
+from system_prompt import SYSTEM_PROMPT
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -18,27 +20,44 @@ load_dotenv()
 DEFAULT_RISK_DATA_FILE = BASE_DIR / "AI" / "Data" / "kd_z_nevarnost_enriched_verified.geojson"
 CHAT_RISK_DATA_FILE = Path(os.getenv("CHAT_RISK_DATA_FILE", str(DEFAULT_RISK_DATA_FILE)))
 CHAT_MAX_TOOL_ROUNDS = max(1, int(os.getenv("CHAT_MAX_TOOL_ROUNDS", "8")))
-CHAT_MAX_OUTPUT_TOKENS = max(256, int(os.getenv("CHAT_MAX_OUTPUT_TOKENS", "1200")))
+CHAT_MAX_OUTPUT_TOKENS = max(256, int(os.getenv("CHAT_MAX_OUTPUT_TOKENS", "4096")))
 CHAT_USAGE_SUMMARY_FILE = Path(
     os.getenv("CHAT_USAGE_SUMMARY_FILE", str(BASE_DIR / "logs" / "chat-usage-summary.json"))
 )
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
 ACTIVE_MODEL_ENV_PREFIX = os.getenv("CHAT_ACTIVE_MODEL_ENV_PREFIX", "CHAT_MODEL_MDML_GPT4O_MINI_001")
 
+@dataclass(frozen=True)
+class ModelSpec:
+    id: str
+    label: str
+    env_prefix: str
+
+MODEL_SPECS = (
+    ModelSpec("mdml-gpt4-1-mini-001", "MDML-GPT4.1-Mini-001", "CHAT_MODEL_MDML_GPT4_1_MINI_001"),
+    ModelSpec("mdml-gpt4o-mini-001", "MDML-GPT4o-Mini-001", "CHAT_MODEL_MDML_GPT4O_MINI_001"),
+    ModelSpec("mdml-gpt4o-001", "MDML-GPT4o-001", "CHAT_MODEL_MDML_GPT4O_001"),
+    ModelSpec("mdml-gpt5-mini-001", "MDML-GPT5-Mini-001", "CHAT_MODEL_MDML_GPT5_MINI_001"),
+    ModelSpec("mdml-gpt5-001", "MDML-GPT5-001", "CHAT_MODEL_MDML_GPT5_001"),
+    ModelSpec("mdml-gpt5-1-001", "MDML-GPT5.1-001", "CHAT_MODEL_MDML_GPT5_1_001"),
+    ModelSpec("mdml-gpt5-2-001", "MDML-GPT5.2-001", "CHAT_MODEL_MDML_GPT5_2_001"),
+    ModelSpec("mdml-gpt5-nano-001", "MDML-GPT5-Nano-001", "CHAT_MODEL_MDML_GPT5_NANO_001"),
+)
+
 EMBED_MODEL=os.getenv("MDML-TextEmbedding-003_DEPLOYMENT")
+EMBED_API_KEY = os.getenv("MDML-TextEmbedding-003_API_KEY")
+EMBED_BASE_URL = os.getenv("MDML-TextEmbedding-003_BASE_URL")
 chroma_client = chromadb.PersistentClient(path="AI/Data/chroma_db")
 collection = chroma_client.get_or_create_collection(name="kulturna_dediscina")
 
-embed_client = AzureOpenAI(
-    api_key=os.getenv("MDML-TextEmbedding-003_API_KEY"),
-    azure_endpoint=os.getenv("MDML-TextEmbedding-003_BASE_URL"),
-    api_version="2024-02-01",
-)
-
-SYSTEM_PROMPT = (
-    """You are KULTURKO, a concise assistant for Slovenian cultural heritage risk data.
-    Use tools for exact facts and do not invent site details. You have web search at your disposal. You can use that whenever you are not certain about your answer.
-    When using web_search always append your sources to the end of your repsonse to the user."""
+embed_client = (
+    AzureOpenAI(
+        api_key=EMBED_API_KEY,
+        azure_endpoint=EMBED_BASE_URL,
+        api_version="2024-02-01",
+    )
+    if EMBED_MODEL and EMBED_API_KEY and EMBED_BASE_URL
+    else None
 )
 
 DATA_LOCK = Lock()
@@ -53,22 +72,20 @@ class ChatServiceError(RuntimeError):           #interni error handler, codex na
 
 
 def list_chat_models() -> list[dict[str, Any]]:         #izpise modele na voljo, v trenutni obliki vedno samo enkrat, koda ce bi zeleli uporabniku dati vec izbire (kot v testiranju)
-    config = _get_model_config()
-    return [
-        {
-            "id": config["id"],
-            "label": config["label"],
-            "deployment": config["deployment"],
-            "available": config["available"],
-            "missingEnv": config["missingEnv"],
-            "supportsWebSearch": True,
-            "isDefault": True,
-        }
-    ]
+    default_model_id = get_default_chat_model_id()
+    return [_serialize_model(spec, default_model_id=default_model_id) for spec in MODEL_SPECS]
 
 
 def get_default_chat_model_id() -> str:
-    return _get_model_config()["id"]
+    preferred_spec = _find_model_spec_by_env_prefix(ACTIVE_MODEL_ENV_PREFIX)
+    if preferred_spec is not None and _resolve_model_config(preferred_spec)["available"]:
+        return preferred_spec.id
+
+    for spec in MODEL_SPECS:
+        if _resolve_model_config(spec)["available"]:
+            return spec.id
+
+    return preferred_spec.id if preferred_spec is not None else MODEL_SPECS[0].id
 
 
 def get_chat_usage_summary() -> dict[str, Any]:         # za /logs
@@ -76,17 +93,15 @@ def get_chat_usage_summary() -> dict[str, Any]:         # za /logs
 
 
 def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None = None, use_web_search: bool) -> dict[str, Any]:
-    config = _get_model_config()
-    requested_model = (model_id or config["id"]).strip()
+    requested_model = (model_id or get_default_chat_model_id()).strip()
+    selected_spec = _find_model_spec_by_id(requested_model)
+    if selected_spec is None:
+        raise ChatServiceError(f"Unknown chat model '{requested_model}'.", status_code=404)
 
-    if requested_model != config["id"]:
-        raise ChatServiceError(
-            f"Only one model is active right now: '{config['id']}'.",
-            status_code=400,
-        )
+    config = _resolve_model_config(selected_spec)
     if not config["available"]:
         raise ChatServiceError(
-            f"Model is not fully configured. Missing: {', '.join(config['missingEnv'])}",
+            f"Model '{config['label']}' is not fully configured. Missing: {', '.join(config['missingEnv'])}",
             status_code=503,
         )
 
@@ -99,7 +114,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
         azure_endpoint=config["azureEndpoint"],
     )
 
-    tools = _build_tools(use_web_search=True)
+    tools = _build_tools(use_web_search=use_web_search)
     aggregated_usage = _empty_usage_totals()
     web_search_used = False
 
@@ -250,6 +265,12 @@ def get_info_by_eid(eid: str, columns: list[str] | None = None) -> dict[str, Any
     return _json_safe(row.to_dict())
 
 def search_heritage_records(query: str, k: int = 5):
+    if embed_client is None or not EMBED_MODEL:
+        raise ChatServiceError(
+            "Semantic search is not configured. Missing embedding model credentials.",
+            status_code=503,
+        )
+
     query_emb = embed_client.embeddings.create(
         model=EMBED_MODEL,
         input=[query]
@@ -520,23 +541,48 @@ def _extract_text_and_citations_from_response(response: Any) -> tuple[str, list[
     return text, unique_citations
 
 
-def _get_model_config() -> dict[str, Any]:
-    deployment = _read_env(f"{ACTIVE_MODEL_ENV_PREFIX}_DEPLOYMENT")
-    api_key = _read_env(f"{ACTIVE_MODEL_ENV_PREFIX}_API_KEY")
-    azure_endpoint = _resolve_azure_endpoint()      
-    model_id = ACTIVE_MODEL_ENV_PREFIX.removeprefix("CHAT_MODEL_").lower()      #pocisti api-key ime v izkljucno ime modela
+def _serialize_model(spec: ModelSpec, *, default_model_id: str) -> dict[str, Any]:
+    config = _resolve_model_config(spec)
+    return {
+        "id": config["id"],
+        "label": config["label"],
+        "deployment": config["deployment"],
+        "available": config["available"],
+        "missingEnv": config["missingEnv"],
+        "supportsWebSearch": True,
+        "isDefault": config["id"] == default_model_id,
+    }
+
+
+def _find_model_spec_by_id(model_id: str) -> ModelSpec | None:
+    return next((spec for spec in MODEL_SPECS if spec.id == model_id), None)
+
+
+def _find_model_spec_by_env_prefix(env_prefix: str) -> ModelSpec | None:
+    return next((spec for spec in MODEL_SPECS if spec.env_prefix == env_prefix), None)
+
+
+def _resolve_model_config(spec: ModelSpec) -> dict[str, Any]:
+    deployment = _read_env(f"{spec.env_prefix}_DEPLOYMENT")
+    api_key = (
+        _read_env(f"{spec.env_prefix}_API_KEY")
+        or _read_env(f"{spec.env_prefix}_TOKEN")
+        or _read_env("AZURE_OPENAI_API_KEY")
+        or _read_env("AZURE_OPENAI_TOKEN")
+    )
+    azure_endpoint = _resolve_azure_endpoint(spec.env_prefix)
 
     missing_env: list[str] = []
     if not deployment:
-        missing_env.append(f"{ACTIVE_MODEL_ENV_PREFIX}_DEPLOYMENT")
+        missing_env.append(f"{spec.env_prefix}_DEPLOYMENT")
     if not api_key:
-        missing_env.append(f"{ACTIVE_MODEL_ENV_PREFIX}_API_KEY")
+        missing_env.append(f"{spec.env_prefix}_API_KEY or AZURE_OPENAI_API_KEY")
     if not azure_endpoint:
-        missing_env.append(f"{ACTIVE_MODEL_ENV_PREFIX}_BASE_URL")
+        missing_env.append(f"{spec.env_prefix}_BASE_URL or AZURE_OPENAI_BASE_URL")
 
     return {
-        "id": model_id,
-        "label": deployment or model_id,
+        "id": spec.id,
+        "label": deployment or spec.label,
         "deployment": deployment,
         "apiKey": api_key,
         "azureEndpoint": azure_endpoint,
@@ -545,8 +591,13 @@ def _get_model_config() -> dict[str, Any]:
     }
 
 
-def _resolve_azure_endpoint() -> str | None:
-    raw = _read_env(f"{ACTIVE_MODEL_ENV_PREFIX}_BASE_URL")
+def _resolve_azure_endpoint(env_prefix: str) -> str | None:
+    raw = (
+        _read_env(f"{env_prefix}_BASE_URL")
+        or _read_env(f"{env_prefix}_ENDPOINT")
+        or _read_env("AZURE_OPENAI_BASE_URL")
+        or _read_env("AZURE_OPENAI_ENDPOINT")
+    )
     if not raw:
         return None
 

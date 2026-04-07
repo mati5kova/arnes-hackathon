@@ -83,6 +83,81 @@ describe("ChatSidebar", () => {
 		expect(secondCall?.[1]?.body).toContain("What is happening near Ptuj?");
 	});
 
+	it("lets the user switch models before sending a message", async () => {
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: "mdml-gpt5-001",
+								label: "MDML-GPT5-001",
+								deployment: "MDML-GPT5-001",
+								available: true,
+								supportsWebSearch: true,
+								isDefault: true,
+								missingEnv: [],
+							},
+							{
+								id: "mdml-gpt4o-mini-001",
+								label: "MDML-GPT4o-Mini-001",
+								deployment: "MDML-GPT4o-Mini-001",
+								available: true,
+								supportsWebSearch: true,
+								isDefault: false,
+								missingEnv: [],
+							},
+						],
+						defaultModelId: "mdml-gpt5-001",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						model: {
+							id: "mdml-gpt4o-mini-001",
+							label: "MDML-GPT4o-Mini-001",
+							deployment: "MDML-GPT4o-Mini-001",
+							available: true,
+							supportsWebSearch: true,
+							isDefault: false,
+							missingEnv: [],
+						},
+						message: {
+							role: "assistant",
+							content: "Switched to the other model.",
+						},
+						citations: [],
+						webSearchUsed: false,
+						responseId: "resp_chat_switch",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+		render(<ChatSidebar />);
+
+		const modelSelect = await screen.findByRole("combobox", { name: /model/i });
+		fireEvent.change(modelSelect, { target: { value: "mdml-gpt4o-mini-001" } });
+
+		fireEvent.change(screen.getByRole("textbox", { name: /ask the ai assistant about heritage risks/i }), {
+			target: { value: "Use the secondary model" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+		expect(await screen.findByText(/switched to the other model/i)).toBeInTheDocument();
+
+		await waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledTimes(2);
+		});
+
+		const [, secondCall] = fetchMock.mock.calls;
+		expect(secondCall?.[1]?.body).toContain('"modelId":"mdml-gpt4o-mini-001"');
+	});
+
 	it("uses a multiline composer and only submits on Enter without Shift", async () => {
 		const fetchMock = vi
 			.spyOn(globalThis, "fetch")
