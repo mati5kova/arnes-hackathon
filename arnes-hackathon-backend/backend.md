@@ -61,6 +61,24 @@ If this dataset is missing:
 - the `river` map overlay will not work
 - regenerating `AI/Data/kd_z_nevarnost_enriched_verified.geojson` will fail
 
+## Canonical Fire Pipeline
+
+Fire hazard is now standardized in derived data so that `1 = low hazard` and `4 = high hazard`.
+The raw source file in `AI/Data_Processing/pozarna_ogrozenost_majhen_100m.geojson` is left untouched.
+
+Rebuild the fire-derived outputs with:
+
+```bash
+./.venv/bin/python AI/rebuild_fire_pipeline.py
+```
+
+This command:
+
+- canonicalizes the derived site GeoJSON files
+- writes `AI/Data/pozarna_ogrozenost_majhen_100m_canonical.geojson` for overlays
+- regenerates `AI/Data/kd_z_nevarnost_enriched_verified.geojson`
+- synchronizes the local Chroma metadata store in `AI/Data/chroma_db` when it exists
+
 ## Tests
 
 Install dev dependencies and run backend tests:

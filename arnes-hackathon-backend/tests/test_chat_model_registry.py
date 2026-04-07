@@ -160,6 +160,105 @@ def test_generate_chat_reply_uses_last_completed_assistant_message(monkeypatch):
     assert result["citations"] == [{"title": "Vir", "url": "https://example.com/vir"}]
 
 
+def test_generate_chat_reply_logs_prompt_and_tool_usage(monkeypatch):
+    monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_DEPLOYMENT", "MDML-GPT4o-Mini-001")
+    monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_API_KEY", "mini-key")
+    monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_BASE_URL", "https://mini-resource.openai.azure.com/openai/v1/")
+
+    logged_events: list[dict[str, object]] = []
+
+    class FakeMessage(SimpleNamespace):
+        pass
+
+    first_response = SimpleNamespace(
+        id="resp_tool_call",
+        output=[],
+        output_text="",
+        usage=SimpleNamespace(
+            input_tokens=12,
+            output_tokens=8,
+            total_tokens=20,
+            output_tokens_details=SimpleNamespace(reasoning_tokens=0),
+        ),
+    )
+    first_response.output = [
+        SimpleNamespace(
+            type="function_call",
+            call_id="call_1",
+            name="get_info_by_eid",
+            arguments='{"eid":"123","columns":["IME"]}',
+        )
+    ]
+
+    second_response = SimpleNamespace(
+        id="resp_finished",
+        output=[],
+        output_text="",
+        usage=SimpleNamespace(
+            input_tokens=11,
+            output_tokens=9,
+            total_tokens=20,
+            output_tokens_details=SimpleNamespace(reasoning_tokens=0),
+        ),
+    )
+    second_response.output = [
+        FakeMessage(
+            type="message",
+            role="assistant",
+            status="completed",
+            content=[
+                SimpleNamespace(
+                    type="output_text",
+                    text='<div class="kulturko-response"><p>Koncano.</p></div>',
+                    annotations=[],
+                )
+            ],
+        )
+    ]
+
+    responses = [first_response, second_response]
+
+    class FakeResponses:
+        def create(self, *, model, input, tools, max_output_tokens):
+            return responses.pop(0)
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    monkeypatch.setattr(chat_service, "_create_azure_client", lambda **kwargs: FakeClient())
+    monkeypatch.setattr(chat_service, "_record_usage_summary", lambda **kwargs: None)
+    monkeypatch.setattr(
+        chat_service,
+        "_log_chat_event",
+        lambda request_id, title, **details: logged_events.append(
+            {"request_id": request_id, "title": title, **details}
+        ),
+    )
+    monkeypatch.setattr(
+        chat_service,
+        "dispatch_tool",
+        lambda name, args: {"tool": name, "args": args, "ok": True},
+    )
+
+    result = chat_service.generate_chat_reply(
+        messages=[{"role": "user", "content": "Povej mi nekaj o EID 123"}],
+        model_id="mdml-gpt4o-mini-001",
+        use_web_search=False,
+    )
+
+    assert result["content"] == '<div class="kulturko-response"><p>Koncano.</p></div>'
+
+    incoming_event = next(event for event in logged_events if event["title"] == "Incoming chat request")
+    assert incoming_event["prompt"] == "Povej mi nekaj o EID 123"
+
+    tool_event = next(event for event in logged_events if event["title"] == "Executing tool call 1/1")
+    assert tool_event["tool_name"] == "get_info_by_eid"
+    assert tool_event["arguments"] == {"eid": "123", "columns": ["IME"]}
+
+    completed_event = next(event for event in logged_events if event["title"] == "Tool 'get_info_by_eid' completed")
+    assert completed_event["call_id"] == "call_1"
+
+
 def test_generate_chat_reply_retries_once_after_incomplete_response(monkeypatch):
     monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_DEPLOYMENT", "MDML-GPT4o-Mini-001")
     monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_API_KEY", "mini-key")

@@ -1,129 +1,65 @@
-# %%
-import geopandas as gpd
-import pandas as pd
-import numpy as np
+from __future__ import annotations
 
-# %%
-gdf = gpd.read_file("AI/Data/kd_z_nevarnost_enriched_verified.geojson")
-gdf = gdf.drop(columns=['geometry'])
-
-# %%
-
-
-# %%
-embed_cols = gdf[['IME', 'SINONIMI', 'OPIS', 'ZVRST', 'TIP', 'GESLA', 'DATACIJA', 'LOKACIJAOPIS', 'prevladujoci_material', 'UE_UIME', 'OBCINA']]
-meta_data_cols = gdf[['EID', 'OBCINA', 'STATUS', 'SPOMENIK', 'UE_UIME', 'prevladujoci_material', 'pozar_ocena_popravljena', 'poplave_ocena_popravljena',
-       'potres_ocena_popravljena', 'plazovi_ocena_popravljena']]
-
-# %%
-def row_to_text(row):
-    parts = []
-    for col, val in row.items():
-        #codex checks za nan value ipd.
-        if val is None:
-            continue
-        if isinstance(val, (list, tuple, np.ndarray, pd.Series)):
-            if len(val) == 0 or pd.isna(val).all():
-                continue
-            text = " ".join(map(str, val)).strip()
-            if not text:
-                continue
-        else:
-            if pd.isna(val) or not str(val).strip():
-                continue
-        
-        if col == 'prevladujoci_material':
-            parts.append(f"material: {val}")
-        elif col == 'UE_UIME':
-            parts.append(f"okraj: {val}")
-        else:
-            parts.append(f"{col.lower()}: {val}")
-
-    return " | ".join(parts)
-
-# %%
-gdf['embed_text'] = embed_cols.apply(row_to_text, axis=1)
-
-# %%
-# %%
-zapisi = []
-
-def clean_metadata(row, columns):
-    out = {}
-    for col in columns:
-        value = row[col]
-
-        if isinstance(value, np.generic):
-            value = value.item()
-
-        if isinstance(value, (list, tuple, np.ndarray, pd.Series)):
-            items = [str(x) for x in value if pd.notna(x)]
-            if items:
-                out[col] = ", ".join(items)
-            continue
-
-        if pd.isna(value):
-            value = ""
-
-        out[col] = value
-
-    return out
-
-for _, row in gdf.iterrows():
-    zapisi.append({
-        "eid" : row['EID'],
-        "text" : row['embed_text'],
-        "meta_data": clean_metadata(row, meta_data_cols.columns),
-    })
-
-# %%
 import os
+from pathlib import Path
+
+import chromadb
 from dotenv import load_dotenv
 from openai import AzureOpenAI
-import chromadb
 
-load_dotenv()
+try:
+    from AI.embedding_pipeline import build_embedding_records, load_canonical_embedding_payload
+except ModuleNotFoundError:
+    from embedding_pipeline import build_embedding_records, load_canonical_embedding_payload
 
-deployment_name = os.getenv("MDML-TextEmbedding-003_DEPLOYMENT")
-api_key = os.getenv("MDML-TextEmbedding-003_API_KEY")
-base_url = os.getenv("MDML-TextEmbedding-003_BASE_URL")
-
-client = AzureOpenAI(
-    api_key=os.getenv("MDML-TextEmbedding-003_API_KEY"),
-    azure_endpoint=os.getenv("MDML-TextEmbedding-003_BASE_URL"),
-    api_version="2024-02-01",
-)
-
-EMBED_MODEL = deployment_name
-total_embedding_tokens = 0
-# %%
-chroma_client = chromadb.PersistentClient(path="AI/Data/chroma_db")
-collection = chroma_client.get_or_create_collection("kulturna_dediscina")
-
+BASE_DIR = Path(__file__).resolve().parent
+CHROMA_PATH = BASE_DIR / "AI" / "Data" / "chroma_db"
+COLLECTION_NAME = "kulturna_dediscina"
 BATCH_SIZE = 100
-for i in range(0, len(zapisi), BATCH_SIZE):
-    print(f"batch nr: {i // BATCH_SIZE}\n")
-    batch = zapisi[i: i+BATCH_SIZE]
-    texts = [r['text'] for r in batch]
 
-    response = client.embeddings.create(
-        model=EMBED_MODEL,
-        input=texts
+
+def build_embedding_client() -> tuple[AzureOpenAI, str]:
+    load_dotenv()
+
+    deployment_name = os.getenv("MDML-TextEmbedding-003_DEPLOYMENT")
+    api_key = os.getenv("MDML-TextEmbedding-003_API_KEY")
+    base_url = os.getenv("MDML-TextEmbedding-003_BASE_URL")
+    if not deployment_name or not api_key or not base_url:
+        raise RuntimeError("Missing Azure embedding configuration for MDML-TextEmbedding-003.")
+
+    client = AzureOpenAI(
+        api_key=api_key,
+        azure_endpoint=base_url,
+        api_version="2024-02-01",
     )
-
-    collection.add(
-        ids=[str(r['eid']) for r in batch],
-        documents=[r['text'] for r in batch],
-        metadatas=[r['meta_data'] for r in batch],
-        embeddings=[item.embedding for item in response.data]
-    )
-
-    total_embedding_tokens += response.usage.total_tokens
-    print(f"batch {i // BATCH_SIZE + 1}: {response.usage.total_tokens} tokens")
-
-print("all embedding tokens:", total_embedding_tokens)
-
-# %%
+    return client, deployment_name
 
 
+def main() -> None:
+    payload = load_canonical_embedding_payload()
+    records = build_embedding_records(payload)
+    client, deployment_name = build_embedding_client()
+    chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+    collection = chroma_client.get_or_create_collection(COLLECTION_NAME)
 
+    total_embedding_tokens = 0
+    for start in range(0, len(records), BATCH_SIZE):
+        batch = records[start : start + BATCH_SIZE]
+        texts = [record["text"] for record in batch]
+        response = client.embeddings.create(model=deployment_name, input=texts)
+
+        collection.upsert(
+            ids=[record["eid"] for record in batch],
+            documents=texts,
+            metadatas=[record["meta_data"] for record in batch],
+            embeddings=[item.embedding for item in response.data],
+        )
+
+        total_embedding_tokens += response.usage.total_tokens
+        print(f"batch {start // BATCH_SIZE + 1}: {response.usage.total_tokens} tokens")
+
+    print(f"all embedding tokens: {total_embedding_tokens}")
+
+
+if __name__ == "__main__":
+    main()

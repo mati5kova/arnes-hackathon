@@ -38,7 +38,7 @@ OVERLAY_HAZARD_FILE = os.getenv("OVERLAY_HAZARD_FILE", str(BASE_DIR / "AI" / "Da
 OVERLAY_AIR_FILE = os.getenv("OVERLAY_AIR_FILE", str(BASE_DIR / "AI" / "Data_Processing" / "zrak_postaje.geojson"))
 OVERLAY_FIRE_AREA_FILE = os.getenv(
     "OVERLAY_FIRE_AREA_FILE",
-    str(BASE_DIR / "AI" / "Data_Processing" / "pozarna_ogrozenost_majhen_100m.geojson"),
+    str(BASE_DIR / "AI" / "Data" / "pozarna_ogrozenost_majhen_100m_canonical.geojson"),
 )
 OVERLAY_FLOOD_FREQUENT_SHP = os.getenv(
     "OVERLAY_FLOOD_FREQUENT_SHP",
@@ -736,10 +736,16 @@ def build_area_grid_cells_with_rasterio(
     count_shapes: list[tuple[dict[str, Any], int]] = []
 
     for area in sorted(areas, key=lambda candidate: float(candidate.get("normalized") or 0.0)):
-        ring = area.get("ring")
-        if not isinstance(ring, list) or len(ring) < 4:
+        rings = area.get("rings")
+        if not isinstance(rings, list) or not rings:
+            ring = area.get("ring")
+            rings = [ring] if isinstance(ring, list) else []
+        if not rings:
             continue
-        geometry = {"type": "Polygon", "coordinates": [ring]}
+        outer_ring = rings[0]
+        if not isinstance(outer_ring, list) or len(outer_ring) < 4:
+            continue
+        geometry = {"type": "Polygon", "coordinates": rings}
         normalized = min(1.0, max(0.0, float(area.get("normalized") or 0.0)))
         weighted_shapes.append((geometry, normalized))
         count_shapes.append((geometry, 1))

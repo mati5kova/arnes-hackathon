@@ -289,6 +289,10 @@ class OverlayArea(BaseModel):
         description="Polygon outer ring in [lng,lat] coordinate pairs.",
         examples=[[[14.12, 46.01], [14.14, 46.01], [14.14, 46.03], [14.12, 46.03], [14.12, 46.01]]],
     )
+    rings: List[List[List[float]]] = Field(
+        description="Polygon rings in [lng,lat] coordinate pairs, where the first ring is the outer boundary and later rings are holes.",
+        examples=[[[[14.12, 46.01], [14.14, 46.01], [14.14, 46.03], [14.12, 46.03], [14.12, 46.01]]]],
+    )
 
 
 class OverlayLine(BaseModel):

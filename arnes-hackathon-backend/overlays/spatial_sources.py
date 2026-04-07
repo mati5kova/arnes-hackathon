@@ -39,20 +39,22 @@ def load_fire_geojson_areas(path: Path, *, score_min: float, score_max: float) -
 
         normalized = normalize_score(raw_score, score_min=score_min, score_max=score_max)
         level = normalized_to_level(normalized)
-        rings = extract_geojson_outer_rings(geometry)
+        polygons = extract_geojson_polygons(geometry)
 
-        for ring_index, ring in enumerate(rings):
-            bounds = compute_ring_bounds(ring)
+        for polygon_index, polygon in enumerate(polygons):
+            outer_ring = polygon[0]
+            bounds = compute_ring_bounds(outer_ring)
             if not bounds:
                 continue
             areas.append(
                 {
-                    "id": f"fire:{feature_index}:{ring_index}",
+                    "id": f"fire:{feature_index}:{polygon_index}",
                     "score": raw_score,
                     "normalized": normalized,
                     "level": level,
                     "bounds": bounds,
-                    "ring": ring,
+                    "ring": outer_ring,
+                    "rings": polygon,
                 }
             )
 
@@ -86,6 +88,7 @@ def load_flood_shapefile_areas(
                     "level": display_level,
                     "bounds": bounds,
                     "ring": ring,
+                    "rings": [ring],
                 }
             )
 
@@ -125,6 +128,7 @@ def load_landslide_shapefile_areas(
                     "level": display_level,
                     "bounds": bounds,
                     "ring": ring,
+                    "rings": [ring],
                 }
             )
 
@@ -166,8 +170,23 @@ def select_visible_areas(
             visible.append(cached_area)
             continue
 
-        simplified = simplify_ring(area["ring"], tolerance=tolerance)
-        bounds = compute_ring_bounds(simplified)
+        raw_rings = area.get("rings")
+        if not isinstance(raw_rings, list) or not raw_rings:
+            raw_ring = area.get("ring")
+            raw_rings = [raw_ring] if isinstance(raw_ring, list) else []
+
+        simplified_rings: list[list[tuple[float, float]]] = []
+        for raw_ring in raw_rings:
+            if not isinstance(raw_ring, list):
+                continue
+            simplified_ring = simplify_ring(raw_ring, tolerance=tolerance)
+            if simplified_ring:
+                simplified_rings.append(simplified_ring)
+
+        if not simplified_rings:
+            continue
+
+        bounds = compute_ring_bounds(simplified_rings[0])
         if not bounds:
             continue
 
@@ -177,7 +196,11 @@ def select_visible_areas(
             "normalized": round(float(area["normalized"]), 4),
             "level": int(area["level"]),
             "bounds": [round(value, 5) for value in bounds],
-            "ring": [[round(point[0], 5), round(point[1], 5)] for point in simplified],
+            "ring": [[round(point[0], 5), round(point[1], 5)] for point in simplified_rings[0]],
+            "rings": [
+                [[round(point[0], 5), round(point[1], 5)] for point in ring]
+                for ring in simplified_rings
+            ],
         }
         render_cache[cache_key] = cached_area
         visible.append(cached_area)
@@ -399,30 +422,45 @@ def get_zoom_tolerance_deg(zoom: int) -> float:
     return 0.00012
 
 
-def extract_geojson_outer_rings(geometry: dict[str, Any]) -> list[list[tuple[float, float]]]:
+def extract_geojson_polygons(geometry: dict[str, Any]) -> list[list[list[tuple[float, float]]]]:
     geometry_type = geometry.get("type")
     coordinates = geometry.get("coordinates")
     if not isinstance(coordinates, list):
         return []
 
-    rings: list[list[tuple[float, float]]] = []
+    polygons: list[list[list[tuple[float, float]]]] = []
     if geometry_type == "Polygon":
-        if coordinates:
-            ring = to_ring(coordinates[0])
-            if ring:
-                rings.append(ring)
-        return rings
+        polygon = to_polygon_rings(coordinates)
+        if polygon:
+            polygons.append(polygon)
+        return polygons
 
     if geometry_type == "MultiPolygon":
         for polygon in coordinates:
-            if not isinstance(polygon, list) or not polygon:
+            if not isinstance(polygon, list):
                 continue
-            ring = to_ring(polygon[0])
-            if ring:
-                rings.append(ring)
-        return rings
+            polygon_rings = to_polygon_rings(polygon)
+            if polygon_rings:
+                polygons.append(polygon_rings)
+        return polygons
 
     return []
+
+
+def to_polygon_rings(value: Any) -> list[list[tuple[float, float]]]:
+    if not isinstance(value, list) or not value:
+        return []
+
+    polygon_rings: list[list[tuple[float, float]]] = []
+    for raw_ring in value:
+        ring = to_ring(raw_ring)
+        if ring:
+            polygon_rings.append(ring)
+
+    if not polygon_rings:
+        return []
+
+    return polygon_rings
 
 
 def to_ring(value: Any) -> list[tuple[float, float]]:
@@ -1045,6 +1083,8 @@ def to_number(value: Any) -> float | None:
     if math.isfinite(number):
         return number
     return None
+
+
 
 
 def clamp_int(value: int, minimum: int, maximum: int) -> int:

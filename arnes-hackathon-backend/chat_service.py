@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from threading import Lock
 from typing import Any
+from uuid import uuid4
 import chromadb
 from openai import AzureOpenAI
 
@@ -22,11 +25,28 @@ CHAT_RISK_DATA_FILE = Path(os.getenv("CHAT_RISK_DATA_FILE", str(DEFAULT_RISK_DAT
 CHAT_MAX_TOOL_ROUNDS = max(1, int(os.getenv("CHAT_MAX_TOOL_ROUNDS", "8")))
 CHAT_MAX_OUTPUT_TOKENS = max(256, int(os.getenv("CHAT_MAX_OUTPUT_TOKENS", "4096")))
 CHAT_INCOMPLETE_RESPONSE_RETRIES = max(0, int(os.getenv("CHAT_INCOMPLETE_RESPONSE_RETRIES", "1")))
+CHAT_ENABLE_CONSOLE_LOGS = os.getenv("CHAT_ENABLE_CONSOLE_LOGS", "true").strip().lower() not in {"0", "false", "no", "off"}
+CHAT_LOG_LEVEL = os.getenv("CHAT_LOG_LEVEL", "INFO").upper()
+CHAT_LOG_PREVIEW_CHARS = max(256, int(os.getenv("CHAT_LOG_PREVIEW_CHARS", "2000")))
 CHAT_USAGE_SUMMARY_FILE = Path(
     os.getenv("CHAT_USAGE_SUMMARY_FILE", str(BASE_DIR / "logs" / "chat-usage-summary.json"))
 )
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
 ACTIVE_MODEL_ENV_PREFIX = os.getenv("CHAT_ACTIVE_MODEL_ENV_PREFIX", "CHAT_MODEL_MDML_GPT4O_MINI_001")
+
+
+def _build_logger() -> logging.Logger:
+    logger = logging.getLogger("chat_service")
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+        logger.addHandler(handler)
+    logger.setLevel(getattr(logging, CHAT_LOG_LEVEL, logging.INFO))
+    logger.propagate = False
+    return logger
+
+
+LOGGER = _build_logger()
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -94,98 +114,204 @@ def get_chat_usage_summary() -> dict[str, Any]:         # za /logs
 
 
 def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None = None, use_web_search: bool) -> dict[str, Any]:
+    request_id = uuid4().hex[:8]
+    request_started = perf_counter()
     requested_model = (model_id or get_default_chat_model_id()).strip()
-    selected_spec = _find_model_spec_by_id(requested_model)
-    if selected_spec is None:
-        raise ChatServiceError(f"Unknown chat model '{requested_model}'.", status_code=404)
-
-    config = _resolve_model_config(selected_spec)
-    if not config["available"]:
-        raise ChatServiceError(
-            f"Model '{config['label']}' is not fully configured. Missing: {', '.join(config['missingEnv'])}",
-            status_code=503,
-        )
-
     conversation_history = _sanitize_messages(messages)
-    if not conversation_history:
-        raise ChatServiceError("At least one chat message is required.", status_code=400)
+    latest_user_prompt = _extract_latest_user_prompt(conversation_history)
+    executed_tool_calls = 0
 
-    client = _create_azure_client(
-        api_key=config["apiKey"],
-        azure_endpoint=config["azureEndpoint"],
+    _log_chat_event(
+        request_id,
+        "Incoming chat request",
+        requested_model=requested_model,
+        web_search_enabled=use_web_search,
+        prompt=latest_user_prompt or "<missing>",
     )
 
-    tools = _build_tools(use_web_search=use_web_search)
-    aggregated_usage = _empty_usage_totals()
-    web_search_used = False
-    incomplete_response_retries = 0
+    try:
+        selected_spec = _find_model_spec_by_id(requested_model)
+        if selected_spec is None:
+            raise ChatServiceError(f"Unknown chat model '{requested_model}'.", status_code=404)
 
-    conversation: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}, *conversation_history]
-    response: Any = None
-    for _ in range(CHAT_MAX_TOOL_ROUNDS + 1):
-        response = client.responses.create(
-            model=config["deployment"],
-            input=conversation,
-            tools=tools,
-            max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
-        )
-        _merge_usage(aggregated_usage, _extract_usage_from_response(response))
-
-        response_items = _response_output_items(response)
-        tool_calls = [item for item in response_items if getattr(item, "type", "") == "function_call"]
-        web_search_used = web_search_used or any(
-            getattr(item, "type", "") == "web_search_call" for item in response_items
-        )
-
-        if not tool_calls:
-            text, citations, response_status = _extract_text_and_citations_from_response(response)
-            if response_status == "incomplete":
-                if incomplete_response_retries < CHAT_INCOMPLETE_RESPONSE_RETRIES:
-                    incomplete_response_retries += 1
-                    continue
-                raise ChatServiceError("The selected model returned an incomplete response.", status_code=502)
-            if not text:
-                raise ChatServiceError("The selected model returned an empty response.", status_code=502)
-
-            _record_usage_summary(
-                model_id=config["id"],
-                model_label=config["label"],
-                deployment=config["deployment"],
-                usage=aggregated_usage,
-                web_search_used=web_search_used
+        config = _resolve_model_config(selected_spec)
+        if not config["available"]:
+            raise ChatServiceError(
+                f"Model '{config['label']}' is not fully configured. Missing: {', '.join(config['missingEnv'])}",
+                status_code=503,
             )
 
-            return {
-                "model": {
-                    "id": config["id"],
-                    "label": config["label"],
-                    "deployment": config["deployment"],
-                },
-                "content": text,
-                "citations": citations,
-                "webSearchUsed": web_search_used,
-                "responseId": getattr(response, "id", None),
-                "usage": aggregated_usage,
-            }
+        if not conversation_history:
+            raise ChatServiceError("At least one chat message is required.", status_code=400)
 
-        conversation.extend(_response_items_to_conversation_messages(response_items))
-        for call in tool_calls:
-            args = _parse_tool_arguments(getattr(call, "arguments", None) or "{}")
-            try:
-                result = dispatch_tool(call.name, args)
-                output = json.dumps(result, ensure_ascii=False, default=str)
-            except Exception as exc:
-                output = json.dumps({"error": str(exc)}, ensure_ascii=False)
+        client = _create_azure_client(
+            api_key=config["apiKey"],
+            azure_endpoint=config["azureEndpoint"],
+        )
 
-            conversation.append(
-                {
-                    "type": "function_call_output",
-                    "call_id": call.call_id,
-                    "output": output,
+        tools = _build_tools(use_web_search=use_web_search)
+        aggregated_usage = _empty_usage_totals()
+        web_search_used = False
+        incomplete_response_retries = 0
+
+        conversation: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}, *conversation_history]
+        response: Any = None
+        for round_index in range(CHAT_MAX_TOOL_ROUNDS + 1):
+            round_number = round_index + 1
+            response = client.responses.create(
+                model=config["deployment"],
+                input=conversation,
+                tools=tools,
+                max_output_tokens=CHAT_MAX_OUTPUT_TOKENS,
+            )
+            round_usage = _extract_usage_from_response(response)
+            _merge_usage(aggregated_usage, round_usage)
+
+            response_items = _response_output_items(response)
+            tool_calls = [item for item in response_items if getattr(item, "type", "") == "function_call"]
+            web_search_calls = [item for item in response_items if getattr(item, "type", "") == "web_search_call"]
+            web_search_used = web_search_used or bool(web_search_calls)
+            if web_search_calls:
+                _log_chat_event(
+                    request_id,
+                    "Web search invoked",
+                    round=round_number,
+                    web_search_calls=len(web_search_calls),
+                )
+
+            if not tool_calls:
+                text, citations, response_status = _extract_text_and_citations_from_response(response)
+                if response_status == "incomplete":
+                    if incomplete_response_retries < CHAT_INCOMPLETE_RESPONSE_RETRIES:
+                        incomplete_response_retries += 1
+                        _log_chat_event(
+                            request_id,
+                            "Model response incomplete, retrying",
+                            retry=incomplete_response_retries,
+                            max_retries=CHAT_INCOMPLETE_RESPONSE_RETRIES,
+                            partial_response=text or "<empty>",
+                        )
+                        continue
+                    raise ChatServiceError("The selected model returned an incomplete response.", status_code=502)
+                if not text:
+                    raise ChatServiceError("The selected model returned an empty response.", status_code=502)
+
+                _record_usage_summary(
+                    model_id=config["id"],
+                    model_label=config["label"],
+                    deployment=config["deployment"],
+                    usage=aggregated_usage,
+                    web_search_used=web_search_used
+                )
+
+                result = {
+                    "model": {
+                        "id": config["id"],
+                        "label": config["label"],
+                        "deployment": config["deployment"],
+                    },
+                    "content": text,
+                    "citations": citations,
+                    "webSearchUsed": web_search_used,
+                    "responseId": getattr(response, "id", None),
+                    "usage": aggregated_usage,
                 }
-            )
+                _log_chat_event(
+                    request_id,
+                    "Chat request completed",
+                    total_duration_ms=_elapsed_ms(request_started),
+                    response_id=result["responseId"],
+                    web_search_used=web_search_used,
+                    tool_calls_executed=executed_tool_calls,
+                    citations=len(citations),
+                )
+                return result
 
-    raise ChatServiceError("Tool loop limit reached before the model finished.", status_code=502)
+            conversation.extend(_response_items_to_conversation_messages(response_items))
+            for call_index, call in enumerate(tool_calls, start=1):
+                raw_arguments = getattr(call, "arguments", None) or "{}"
+                call_id = getattr(call, "call_id", None)
+                tool_name = getattr(call, "name", "<unknown>")
+
+                try:
+                    args = _parse_tool_arguments(raw_arguments)
+                except Exception as exc:
+                    output = json.dumps({"error": str(exc)}, ensure_ascii=False)
+                    _log_chat_event(
+                        request_id,
+                        f"Tool call {call_index}/{len(tool_calls)} argument parsing failed",
+                        level=logging.WARNING,
+                        call_id=call_id,
+                        tool_name=tool_name,
+                        raw_arguments=raw_arguments,
+                        error=f"{exc.__class__.__name__}: {exc}",
+                    )
+                    conversation.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": output,
+                        }
+                    )
+                    continue
+
+                executed_tool_calls += 1
+                _log_chat_event(
+                    request_id,
+                    f"Executing tool call {call_index}/{len(tool_calls)}",
+                    call_id=call_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                )
+                tool_started = perf_counter()
+                try:
+                    result = dispatch_tool(tool_name, args)
+                    output = json.dumps(result, ensure_ascii=False, default=str)
+                    _log_chat_event(
+                        request_id,
+                        f"Tool '{tool_name}' completed",
+                        call_id=call_id,
+                        duration_ms=_elapsed_ms(tool_started),
+                    )
+                except Exception as exc:
+                    output = json.dumps({"error": str(exc)}, ensure_ascii=False)
+                    _log_chat_event(
+                        request_id,
+                        f"Tool '{tool_name}' failed",
+                        level=logging.WARNING,
+                        call_id=call_id,
+                        duration_ms=_elapsed_ms(tool_started),
+                        error=f"{exc.__class__.__name__}: {exc}",
+                    )
+
+                conversation.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": output,
+                    }
+                )
+
+        raise ChatServiceError("Tool loop limit reached before the model finished.", status_code=502)
+    except ChatServiceError as exc:
+        _log_chat_event(
+            request_id,
+            "Chat request failed",
+            level=logging.ERROR,
+            total_duration_ms=_elapsed_ms(request_started),
+            status_code=exc.status_code,
+            error=str(exc),
+        )
+        raise
+    except Exception as exc:
+        _log_chat_event(
+            request_id,
+            "Chat request crashed",
+            level=logging.ERROR,
+            total_duration_ms=_elapsed_ms(request_started),
+            error=f"{exc.__class__.__name__}: {exc}",
+        )
+        raise
 
 
 def run(
@@ -292,8 +418,6 @@ def search_heritage_records(query: str, k: int = 5):
         query_args["where"] = where
     
     result = collection.query(**query_args)
-    #results->dict z moznimi: "ids", "metadatas", "documents"(text ki je bil embeddan)
-    print(result)
     return result
 
 
@@ -481,6 +605,67 @@ def _parse_tool_arguments(raw: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("Tool arguments must be a JSON object.")
     return parsed
+
+
+def _extract_latest_user_prompt(messages: list[dict[str, Any]]) -> str | None:
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = str(message.get("content") or "").strip()
+        if content:
+            return content
+    return None
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return round((perf_counter() - started_at) * 1000, 1)
+
+
+def _truncate_for_log(text: str, *, limit: int = CHAT_LOG_PREVIEW_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}... [truncated {len(text) - limit} chars]"
+
+
+def _format_log_value(value: Any) -> str:
+    if value is None:
+        return "<none>"
+
+    if isinstance(value, str):
+        rendered = value.strip("\n")
+    elif isinstance(value, (dict, list, tuple)):
+        rendered = json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    else:
+        rendered = str(value)
+
+    return _truncate_for_log(rendered)
+
+
+def _indent_log_block(text: str, *, prefix: str = "    ") -> str:
+    return "\n".join(f"{prefix}{line}" if line else prefix.rstrip() for line in text.splitlines())
+
+
+def _log_chat_event(request_id: str, title: str, *, level: int = logging.INFO, **details: Any) -> None:
+    if not CHAT_ENABLE_CONSOLE_LOGS:
+        return
+    if not LOGGER.isEnabledFor(level):
+        return
+
+    lines = [
+        "=" * 36,
+        f"[chat:{request_id}] {title}",
+    ]
+
+    for key, value in details.items():
+        rendered = _format_log_value(value)
+        if "\n" in rendered:
+            lines.append(f"  {key}:")
+            lines.append(_indent_log_block(rendered))
+        else:
+            lines.append(f"  {key}: {rendered}")
+
+    lines.append("=" * 36)
+    LOGGER.log(level, "\n".join(lines))
 
 
 def _response_output_items(response: Any) -> list[Any]:

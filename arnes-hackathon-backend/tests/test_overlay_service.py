@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -55,6 +56,37 @@ def test_build_grid_cells_generates_valid_bounds_and_levels():
         assert len(cell["bounds"]) == 4
         assert 1 <= int(cell["level"]) <= 4
         assert 0.0 <= float(cell["normalized"]) <= 1.0
+
+
+def test_load_fire_geojson_areas_preserves_holes_from_canonical_overlay(tmp_path):
+    fire_geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {
+                    "pozar": "4",
+                },
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[14.0, 46.0], [14.2, 46.0], [14.2, 46.2], [14.0, 46.2], [14.0, 46.0]],
+                        [[14.05, 46.05], [14.15, 46.05], [14.15, 46.15], [14.05, 46.15], [14.05, 46.05]],
+                    ],
+                },
+            }
+        ],
+    }
+    path = tmp_path / "fire.geojson"
+    path.write_text(json.dumps(fire_geojson), encoding="utf-8")
+
+    areas = spatial_sources.load_fire_geojson_areas(path, score_min=1.0, score_max=4.0)
+
+    assert len(areas) == 1
+    assert areas[0]["score"] == 4.0
+    assert areas[0]["normalized"] == 1.0
+    assert len(areas[0]["rings"]) == 2
+    assert areas[0]["ring"] == areas[0]["rings"][0]
 
 
 def test_aggregate_points_to_grid_respects_max_cell_limit(monkeypatch):
@@ -199,6 +231,31 @@ def test_select_visible_areas_reuses_per_zoom_render_cache(monkeypatch):
 
     assert simplify_call_count["count"] == 1
     assert first["areas"][0] is second["areas"][0]
+
+
+def test_select_visible_areas_preserves_holes_in_cached_geometry():
+    area = {
+        "id": "area:holey",
+        "score": 4.0,
+        "normalized": 1.0,
+        "level": 4,
+        "bounds": [14.0, 46.0, 14.2, 46.2],
+        "ring": [(14.0, 46.0), (14.2, 46.0), (14.2, 46.2), (14.0, 46.2), (14.0, 46.0)],
+        "rings": [
+            [(14.0, 46.0), (14.2, 46.0), (14.2, 46.2), (14.0, 46.2), (14.0, 46.0)],
+            [(14.05, 46.05), (14.15, 46.05), (14.15, 46.15), (14.05, 46.15), (14.05, 46.05)],
+        ],
+    }
+
+    payload = spatial_sources.select_visible_areas(
+        areas=[area],
+        bbox=[13.9, 45.9, 14.3, 46.3],
+        zoom=10,
+        max_items=100,
+    )
+
+    assert payload["areas"][0]["ring"] == [[14.0, 46.0], [14.2, 46.0], [14.2, 46.2], [14.0, 46.2], [14.0, 46.0]]
+    assert len(payload["areas"][0]["rings"]) == 2
 
 
 def test_get_target_max_area_grid_cells_grows_with_zoom_and_respects_cap(monkeypatch):

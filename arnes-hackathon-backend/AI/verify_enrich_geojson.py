@@ -13,6 +13,11 @@ import numpy as np
 from shapely.geometry import Point
 from shapely.strtree import STRtree
 
+try:
+    from AI.fire_pipeline import FIRE_SCORE_MAX, FIRE_SCORE_MIN, ensure_canonical_fire_scale
+except ModuleNotFoundError:
+    from fire_pipeline import FIRE_SCORE_MAX, FIRE_SCORE_MIN, ensure_canonical_fire_scale
+
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_PATH = BASE_DIR / "Data" / "kd_visine.geojson"
 OUTPUT_PATH = BASE_DIR / "Data" / "kd_z_nevarnost_enriched_verified.geojson"
@@ -392,6 +397,12 @@ def limit_delta(value: float, original: float) -> float:
     return rounded_score(value)
 
 
+def limit_fire_delta(value: float, original: float) -> float:
+    value = clamp(value, original - 1.0, original + 1.0)
+    value = clamp(value, FIRE_SCORE_MIN, FIRE_SCORE_MAX)
+    return rounded_score(value)
+
+
 def clamp_score(value: float) -> float:
     return rounded_score(clamp(value, 0.0, 4.0))
 
@@ -490,7 +501,9 @@ def material_from_properties(props: dict[str, object]) -> tuple[str, float, str]
 
 
 def infer_fire(props: dict[str, object], material: str, text: str) -> tuple[float, list[str]]:
-    original = float(props.get("pozar") or 0.0)
+    original = safe_float(props.get("pozar"))
+    if original is None:
+        original = FIRE_SCORE_MIN
     adjustment = 0.0
     cues: list[str] = []
 
@@ -517,7 +530,7 @@ def infer_fire(props: dict[str, object], material: str, text: str) -> tuple[floa
         adjustment += 0.2
         cues.append("highly combustible farm/outbuilding type")
 
-    return limit_delta(original + adjustment, original), cues
+    return limit_fire_delta(original + adjustment, original), cues
 
 
 def infer_earthquake(props: dict[str, object], material: str, text: str) -> tuple[float, list[str]]:
@@ -1292,6 +1305,11 @@ def main() -> None:
     with INPUT_PATH.open("r", encoding="utf-8") as handle:
         data = json.load(handle)
 
+    ensure_canonical_fire_scale(
+        data,
+        fields=("pozar",),
+        source_note=f"canonicalized during enrichment from {INPUT_PATH.name}",
+    )
     features = data.get("features", [])
     print(f"Loaded {len(features)} features from {INPUT_PATH}")
     print("Racunam uradne poplavne, recne in terenske kontekste...")
