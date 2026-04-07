@@ -21,6 +21,7 @@ DEFAULT_RISK_DATA_FILE = BASE_DIR / "AI" / "Data" / "kd_z_nevarnost_enriched_ver
 CHAT_RISK_DATA_FILE = Path(os.getenv("CHAT_RISK_DATA_FILE", str(DEFAULT_RISK_DATA_FILE)))
 CHAT_MAX_TOOL_ROUNDS = max(1, int(os.getenv("CHAT_MAX_TOOL_ROUNDS", "8")))
 CHAT_MAX_OUTPUT_TOKENS = max(256, int(os.getenv("CHAT_MAX_OUTPUT_TOKENS", "4096")))
+CHAT_INCOMPLETE_RESPONSE_RETRIES = max(0, int(os.getenv("CHAT_INCOMPLETE_RESPONSE_RETRIES", "1")))
 CHAT_USAGE_SUMMARY_FILE = Path(
     os.getenv("CHAT_USAGE_SUMMARY_FILE", str(BASE_DIR / "logs" / "chat-usage-summary.json"))
 )
@@ -117,6 +118,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
     tools = _build_tools(use_web_search=use_web_search)
     aggregated_usage = _empty_usage_totals()
     web_search_used = False
+    incomplete_response_retries = 0
 
     conversation: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}, *conversation_history]
     response: Any = None
@@ -130,15 +132,18 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
         _merge_usage(aggregated_usage, _extract_usage_from_response(response))
 
         response_items = _response_output_items(response)
-        conversation.extend(_response_items_to_conversation_messages(response_items))
-
         tool_calls = [item for item in response_items if getattr(item, "type", "") == "function_call"]
         web_search_used = web_search_used or any(
             getattr(item, "type", "") == "web_search_call" for item in response_items
         )
 
         if not tool_calls:
-            text, citations = _extract_text_and_citations_from_response(response)
+            text, citations, response_status = _extract_text_and_citations_from_response(response)
+            if response_status == "incomplete":
+                if incomplete_response_retries < CHAT_INCOMPLETE_RESPONSE_RETRIES:
+                    incomplete_response_retries += 1
+                    continue
+                raise ChatServiceError("The selected model returned an incomplete response.", status_code=502)
             if not text:
                 raise ChatServiceError("The selected model returned an empty response.", status_code=502)
 
@@ -150,9 +155,6 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
                 web_search_used=web_search_used
             )
 
-            print("\n \n \n")
-            print(json.dumps(conversation, ensure_ascii=False, indent=2, default=str))  
-              
             return {
                 "model": {
                     "id": config["id"],
@@ -166,6 +168,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
                 "usage": aggregated_usage,
             }
 
+        conversation.extend(_response_items_to_conversation_messages(response_items))
         for call in tool_calls:
             args = _parse_tool_arguments(getattr(call, "arguments", None) or "{}")
             try:
@@ -507,27 +510,28 @@ def _response_items_to_conversation_messages(items: list[Any]) -> list[dict[str,
     return conversation_messages
 
 
-def _extract_text_and_citations_from_response(response: Any) -> tuple[str, list[dict[str, Any]]]:
-    text = str(getattr(response, "output_text", "") or "").strip()
+def _extract_text_and_citations_from_message(message: Any) -> tuple[str, list[dict[str, Any]]]:
+    text_parts: list[str] = []
     citations: list[dict[str, Any]] = []
 
-    for item in _response_output_items(response):
-        if getattr(item, "type", "") != "message":
+    for content_item in getattr(message, "content", []) or []:
+        if getattr(content_item, "type", "") != "output_text":
             continue
-        for content_item in getattr(item, "content", []) or []:
-            if getattr(content_item, "type", "") != "output_text":
+        text_part = str(getattr(content_item, "text", "") or "")
+        if text_part:
+            text_parts.append(text_part)
+
+        annotations = getattr(content_item, "annotations", []) or []
+        for annotation in annotations:
+            url = getattr(annotation, "url", None) or getattr(annotation, "source", None)
+            if not url:
                 continue
-            annotations = getattr(content_item, "annotations", []) or []
-            for annotation in annotations:
-                url = getattr(annotation, "url", None) or getattr(annotation, "source", None)
-                if not url:
-                    continue
-                citations.append(
-                    {
-                        "title": getattr(annotation, "title", None),
-                        "url": url,
-                    }
-                )
+            citations.append(
+                {
+                    "title": getattr(annotation, "title", None),
+                    "url": url,
+                }
+            )
 
     unique_citations: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
@@ -538,7 +542,26 @@ def _extract_text_and_citations_from_response(response: Any) -> tuple[str, list[
         seen_urls.add(url)
         unique_citations.append(citation)
 
-    return text, unique_citations
+    return "".join(text_parts).strip(), unique_citations
+
+
+def _extract_text_and_citations_from_response(response: Any) -> tuple[str, list[dict[str, Any]], str]:
+    assistant_messages = [
+        item
+        for item in _response_output_items(response)
+        if getattr(item, "type", "") == "message" and str(getattr(item, "role", "assistant") or "assistant") == "assistant"
+    ]
+
+    for message in reversed(assistant_messages):
+        status = str(getattr(message, "status", "") or "")
+        text, citations = _extract_text_and_citations_from_message(message)
+        if status == "incomplete":
+            return text, citations, "incomplete"
+        if text:
+            return text, citations, status or "completed"
+
+    text = str(getattr(response, "output_text", "") or "").strip()
+    return text, [], "completed" if text else ""
 
 
 def _serialize_model(spec: ModelSpec, *, default_model_id: str) -> dict[str, Any]:
