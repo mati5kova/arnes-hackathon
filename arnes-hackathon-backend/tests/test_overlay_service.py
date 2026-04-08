@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from pathlib import Path
+
+import pytest
+
 from overlays import service
 from overlays import spatial_sources
 
@@ -194,3 +199,240 @@ def test_select_visible_areas_reuses_per_zoom_render_cache(monkeypatch):
 
     assert simplify_call_count["count"] == 1
     assert first["areas"][0] is second["areas"][0]
+
+
+def test_get_target_max_area_grid_cells_grows_with_zoom_and_respects_cap(monkeypatch):
+    monkeypatch.setattr(service, "OVERLAY_MAX_AREA_GRID_CELLS", 2400)
+
+    overview = service.get_target_max_area_grid_cells(5)
+    closeup = service.get_target_max_area_grid_cells(10)
+
+    assert overview < closeup
+    assert closeup <= 2400
+
+
+def test_list_overlay_grid_area_mode_uses_grid_cells_when_enabled(monkeypatch):
+    dataset = {
+        "loaded_at": 1762230400456.0,
+        "points_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "areas_by_kind": {
+            "fire": [],
+            "flood": [
+                {
+                    "id": "flood:1",
+                    "score": 3.0,
+                    "normalized": 1.0,
+                    "level": 4,
+                    "bounds": [14.0, 46.0, 14.2, 46.2],
+                    "ring": [(14.0, 46.0), (14.2, 46.0), (14.2, 46.2), (14.0, 46.2), (14.0, 46.0)],
+                }
+            ],
+            "air": [],
+            "landslide": [],
+        },
+        "area_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+    }
+
+    monkeypatch.setattr(service, "get_overlay_dataset", lambda refresh=False: dataset)
+    monkeypatch.setattr(service, "should_use_area_grid", lambda *, kind, zoom: True)
+    monkeypatch.setattr(
+        service,
+        "aggregate_areas_to_grid",
+        lambda **kwargs: {
+            "cells": [
+                {
+                    "id": "cell:0:0",
+                    "score": 2.8,
+                    "normalized": 0.9,
+                    "level": 4,
+                    "sampleCount": 1,
+                    "bounds": [14.0, 46.0, 14.1, 46.1],
+                }
+            ],
+            "sample_count": 1,
+            "cell_size_deg": 0.1,
+        },
+    )
+
+    payload = service.list_overlay_grid(kind="flood", bbox=[13.9, 45.9, 14.3, 46.3], zoom=8)
+
+    assert payload["areas"] == []
+    assert payload["cells"][0]["id"] == "cell:0:0"
+    assert payload["sampleCount"] == 1
+    assert payload["gridCellSizeDeg"] == 0.1
+
+
+def test_list_overlay_grid_line_mode_uses_visible_lines(monkeypatch):
+    dataset = {
+        "loaded_at": 1762230400456.0,
+        "points_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "areas_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "area_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "line_source_by_kind": {
+            kind: (
+                {
+                    "path": "/tmp/rivers.shp",
+                    "records": [
+                        {
+                            "id": "river:1",
+                            "bounds": [14.0, 46.0, 14.2, 46.2],
+                            "contentOffset": 108,
+                            "contentLength": 64,
+                        }
+                    ],
+                }
+                if kind == "river"
+                else None
+            )
+            for kind in service.OVERLAY_DEFINITIONS
+        },
+        "line_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+    }
+
+    monkeypatch.setattr(service, "get_overlay_dataset", lambda refresh=False: dataset)
+    monkeypatch.setattr(
+        service,
+        "select_visible_lines",
+        lambda **kwargs: {
+            "lines": [
+                {
+                    "id": "river:1",
+                    "bounds": [14.0, 46.0, 14.2, 46.2],
+                    "paths": [[[14.0, 46.0], [14.2, 46.2]]],
+                }
+            ],
+            "in_view_count": 1,
+        },
+    )
+
+    payload = service.list_overlay_grid(kind="river", bbox=[13.9, 45.9, 14.3, 46.3], zoom=8)
+
+    assert payload["areas"] == []
+    assert payload["cells"] == []
+    assert payload["lines"][0]["id"] == "river:1"
+    assert payload["sampleCount"] == 1
+
+
+@pytest.mark.skipif(not service.HAS_RASTERIO, reason="rasterio is required for area-grid rasterization tests")
+def test_build_area_grid_cells_with_rasterio_returns_non_empty_cells():
+    cells = service.build_area_grid_cells_with_rasterio(
+        areas=[
+            {
+                "id": "area:1",
+                "normalized": 0.75,
+                "ring": [(14.0, 46.0), (14.1, 46.0), (14.1, 46.1), (14.0, 46.1), (14.0, 46.0)],
+            }
+        ],
+        bbox=[13.95, 45.95, 14.15, 46.15],
+        cell_size_deg=0.02,
+        score_min=1.0,
+        score_max=4.0,
+    )
+
+    assert cells
+    assert all("bounds" in cell for cell in cells)
+    assert all(cell["normalized"] > 0 for cell in cells)
+
+
+def test_overlay_source_paths_exist():
+    required_source_paths = {
+        "OVERLAY_HAZARD_FILE": service.OVERLAY_HAZARD_FILE,
+        "OVERLAY_AIR_FILE": service.OVERLAY_AIR_FILE,
+        "OVERLAY_FIRE_AREA_FILE": service.OVERLAY_FIRE_AREA_FILE,
+        "OVERLAY_FLOOD_FREQUENT_SHP": service.OVERLAY_FLOOD_FREQUENT_SHP,
+        "OVERLAY_FLOOD_RARE_SHP": service.OVERLAY_FLOOD_RARE_SHP,
+        "OVERLAY_FLOOD_VERY_RARE_SHP": service.OVERLAY_FLOOD_VERY_RARE_SHP,
+        "OVERLAY_LANDSLIDE_SHP": service.OVERLAY_LANDSLIDE_SHP,
+        "OVERLAY_LANDSLIDE_DBF": service.OVERLAY_LANDSLIDE_DBF,
+    }
+
+    missing = [
+        f"{name} -> {path}"
+        for name, path in required_source_paths.items()
+        if not Path(path).is_file()
+    ]
+    assert not missing, (
+        "Overlay source files are missing. If paths moved, update overlays/service.py defaults or "
+        "set the OVERLAY_* env vars.\n"
+        + "\n".join(missing)
+    )
+
+
+def test_load_overlay_lines_returns_empty_river_records_when_local_dataset_is_missing(monkeypatch):
+    monkeypatch.setattr(service, "OVERLAY_RIVER_LINE_SHP", "/tmp/does-not-exist-river.shp")
+
+    result = service.load_overlay_lines()
+
+    assert result["river"] == {
+        "path": "/tmp/does-not-exist-river.shp",
+        "records": [],
+    }
+
+
+def _empty_overlay_cache() -> dict:
+    return {
+        "loaded_at": 0.0,
+        "loading": False,
+        "last_error": None,
+        "points_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "areas_by_kind": {kind: [] for kind in service.OVERLAY_DEFINITIONS},
+        "area_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "line_source_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "line_index_by_kind": {kind: None for kind in service.OVERLAY_DEFINITIONS},
+        "source_meta": {
+            "hazard_file": service.OVERLAY_HAZARD_FILE,
+            "air_file": service.OVERLAY_AIR_FILE,
+            "fire_area_file": service.OVERLAY_FIRE_AREA_FILE,
+            "flood_frequent_shp": service.OVERLAY_FLOOD_FREQUENT_SHP,
+            "flood_rare_shp": service.OVERLAY_FLOOD_RARE_SHP,
+            "flood_very_rare_shp": service.OVERLAY_FLOOD_VERY_RARE_SHP,
+            "landslide_shp": service.OVERLAY_LANDSLIDE_SHP,
+            "landslide_dbf": service.OVERLAY_LANDSLIDE_DBF,
+            "river_line_shp": service.OVERLAY_RIVER_LINE_SHP,
+        },
+    }
+
+
+@pytest.fixture
+def restore_overlay_cache_state():
+    original_cache = deepcopy(service.overlay_cache)
+    original_view_cache = deepcopy(service.overlay_view_cache)
+    try:
+        yield
+    finally:
+        service.overlay_cache.clear()
+        service.overlay_cache.update(original_cache)
+        service.overlay_view_cache.clear()
+        service.overlay_view_cache.update(original_view_cache)
+
+
+def test_get_overlay_dataset_returns_stale_cache_when_refresh_load_fails(monkeypatch, restore_overlay_cache_state):
+    stale_cache = _empty_overlay_cache()
+    stale_cache["loaded_at"] = 123.0
+    stale_cache["points_by_kind"]["air"] = [(14.5, 46.1, 2.3)]
+    service.overlay_cache.clear()
+    service.overlay_cache.update(stale_cache)
+
+    def failing_load_points():
+        raise RuntimeError("simulated overlay loader failure")
+
+    monkeypatch.setattr(service, "load_overlay_points", failing_load_points)
+
+    result = service.get_overlay_dataset(refresh=True)
+
+    assert result["points_by_kind"]["air"] == [(14.5, 46.1, 2.3)]
+    assert result["loading"] is False
+    assert "simulated overlay loader failure" in str(result["last_error"])
+
+
+def test_get_overlay_dataset_raises_when_refresh_load_fails_without_stale_data(monkeypatch, restore_overlay_cache_state):
+    service.overlay_cache.clear()
+    service.overlay_cache.update(_empty_overlay_cache())
+
+    def failing_load_points():
+        raise RuntimeError("simulated overlay loader failure")
+
+    monkeypatch.setattr(service, "load_overlay_points", failing_load_points)
+
+    with pytest.raises(RuntimeError, match="Unable to load overlay data"):
+        service.get_overlay_dataset(refresh=True)

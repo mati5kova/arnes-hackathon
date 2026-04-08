@@ -25,6 +25,7 @@ interface MockDataState {
 					leastLabel: string;
 					mostLabel: string;
 				};
+				areas: [];
 				cells: Array<{
 					id: string;
 					normalized: number;
@@ -33,6 +34,9 @@ interface MockDataState {
 					sampleCount: number;
 					bounds: [number, number, number, number];
 				}>;
+				lines: [];
+				sampleCount: number;
+				generatedAt: number;
 		  }
 		| undefined;
 	searchResults: HeritageSiteSummary[];

@@ -16,3 +16,8 @@ htmlcov/
 
 # Generated dataset artifact
 rnpd.preprocessed.json
+
+# Generated local enrichment artifact
+AI/Data/kd_z_nevarnost_enriched_verified.geojson
+DRSV_HIDRO5_LIN_PV/
+chroma_db/

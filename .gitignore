@@ -28,6 +28,9 @@
 
 # Backend generated data
 arnes-hackathon-backend/rnpd.preprocessed.json
+arnes-hackathon-backend/logs/*
+arnes-hackathon-backend/AI/Data/kd_z_nevarnost_enriched_verified.geojson
+arnes-hackathon-backend/AI/Data_Processing/DRSV_HIDRO5_LIN_PV/
 
 #jupyter notebook
 **/.ipynb_checkpoints

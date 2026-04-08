@@ -20,6 +20,8 @@
 		"@types/leaflet": "^1.9.21",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
+		"dompurify": "^3.3.3",
+		"html-react-parser": "^6.0.0",
 		"leaflet": "^1.9.4",
 		"lucide-react": "^0.462.0",
 		"next-themes": "^0.3.0",

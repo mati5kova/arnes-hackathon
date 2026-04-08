@@ -22,6 +22,7 @@ cd arnes-hackathon-backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
+cp .env.example .env
 ```
 
 Run the backend:
@@ -29,6 +30,15 @@ Run the backend:
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8787 --reload
 ```
+
+For chat, configure Azure OpenAI in `arnes-hackathon-backend/.env`.
+
+- Set `AZURE_OPENAI_BASE_URL` to your Azure resource URL ending with `/openai/v1/`
+- Set `AZURE_OPENAI_API_KEY` to a shared key/token, or set per-model `CHAT_MODEL_*_API_KEY`
+- Keep or edit the provided `CHAT_MODEL_*_DEPLOYMENT` values to match your Azure deployment names
+- The frontend model picker is populated from `GET /api/chat/models`
+- The web-search toggle enables Azure's `web_search_preview` tool per request
+- Per-model token totals are persisted to `arnes-hackathon-backend/logs/chat-usage-summary.json` by default and exposed via `GET /api/chat/usage`
 
 Available locally at:
 
@@ -42,6 +52,7 @@ Open a second terminal, then:
 
 ```bash
 cd arnes-hackathon-frontend
+cp .env.example .env.local
 npm install
 npm run dev
 ```
@@ -96,8 +107,8 @@ Do not open `dist/index.html` directly with `file://`; serve it through an HTTP 
 ## Notes
 
 - Backend data is local-first and uses `arnes-hackathon-backend/rnpd.json` by default.
-- Overlay data is exposed through `GET /api/overlays` and `GET /api/overlays/{kind}` (`fire`, `flood`, `air`, `landslide`), with viewport/zoom aggregation for map performance.
+- The chat assistant also uses `arnes-hackathon-backend/AI/Data/kd_z_nevarnost.geojson` for local heritage-risk lookups.
+- Overlay data is exposed through `GET /api/overlays` and `GET /api/overlays/{kind}` (`fire`, `flood`, `air`, `landslide`), with viewport/zoom aggregation for map performance. Heavy area overlays (`flood`, `landslide`) use low-zoom grid rendering for faster responses and keep polygon detail at higher zoom.
+- Chat endpoints are available at `GET /api/chat/models`, `GET /api/chat/usage`, and `POST /api/chat`.
 - Backend dev dependencies are listed in `arnes-hackathon-backend/requirements-dev.txt`.
 - More detailed run notes are in `arnes-hackathon-frontend/RUN.md` and `arnes-hackathon-backend/backedn.md`.
-
-DEV PRIMOŽ

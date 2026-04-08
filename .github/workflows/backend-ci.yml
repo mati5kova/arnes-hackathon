@@ -1,17 +1,19 @@
-name: Backend CI
+name: CI
 
 on:
   push:
     paths:
       - "arnes-hackathon-backend/**"
+      - "arnes-hackathon-frontend/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
     paths:
       - "arnes-hackathon-backend/**"
+      - "arnes-hackathon-frontend/**"
       - ".github/workflows/backend-ci.yml"
 
 jobs:
-  tests:
+  backend-tests:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,3 +34,25 @@ jobs:
 
       - name: Run backend tests
         run: pytest -q
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: arnes-hackathon-frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: arnes-hackathon-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run frontend tests
+        run: npm test

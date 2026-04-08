@@ -1,8 +1,9 @@
+import type { MessageBundle } from "@/lib/i18n";
 import { ApiError, type ApiHealthStatus } from "@/lib/heritage-api";
 import { MAX_RECENT_SEARCHES, RECENT_SEARCHES_KEY } from "./constants";
 
 const MAX_RECENT_SEARCH_CHIPS = 10;
-type RecoveryMessages = (typeof import("@/lib/i18n").messages)["en"]["map"]["recovery"];
+type RecoveryMessages = MessageBundle["map"]["recovery"];
 
 export function readPersistedRecentSearches() {
 	if (typeof window === "undefined") return [];

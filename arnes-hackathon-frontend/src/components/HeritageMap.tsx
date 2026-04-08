@@ -213,11 +213,13 @@ const HeritageMap = () => {
 	const isRetryNowDisabled = markersQuery.isFetching && healthQuery.isFetching;
 	const overlayAreas = overlayGrid?.areas ?? [];
 	const overlayCells = overlayGrid?.cells ?? [];
+	const overlayLines = overlayGrid?.lines ?? [];
 	const overlayLoading = Boolean(activeOverlay) && overlayQuery.isFetching;
 	const overlayHasError = Boolean(activeOverlay) && Boolean(overlayQuery.error);
-	const renderedOverlayCount = overlayAreas.length > 0 ? overlayAreas.length : overlayCells.length;
-	const renderedOverlayUnit = overlayAreas.length > 0 ? "areas" : "cells";
-	const overlayLayerKey = `${activeOverlay ?? "none"}:${overlayGrid?.generatedAt ?? 0}:${overlayAreas.length}:${overlayCells.length}:${overlayGrid?.sampleCount ?? 0}`;
+	const renderedOverlayCount =
+		overlayAreas.length > 0 ? overlayAreas.length : overlayCells.length > 0 ? overlayCells.length : overlayLines.length;
+	const renderedOverlayUnit = overlayAreas.length > 0 ? "areas" : overlayCells.length > 0 ? "cells" : "lines";
+	const overlayLayerKey = `${activeOverlay ?? "none"}:${overlayGrid?.generatedAt ?? 0}:${overlayAreas.length}:${overlayCells.length}:${overlayLines.length}:${overlayGrid?.sampleCount ?? 0}`;
 
 	const handleRetryNow = () => {
 		void healthQuery.refetch();
@@ -277,7 +279,7 @@ const HeritageMap = () => {
 						setZoom(nextZoom);
 					}}
 				/>
-				<OverlayLayer layerKey={overlayLayerKey} areas={overlayAreas} cells={overlayCells} />
+				<OverlayLayer layerKey={overlayLayerKey} areas={overlayAreas} cells={overlayCells} lines={overlayLines} />
 				<MarkerLayer markerSites={markerSites} onMarkerClick={handleMarkerClick} />
 				<FlyToSite
 					site={flyTarget}

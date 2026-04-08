@@ -8,6 +8,7 @@ export interface HeritageSiteSummary {
 	protectionStatus?: string;
 	municipality?: string;
 	description?: string;
+	elevationM?: number;
 	isCluster?: boolean;
 	clusterCount?: number;
 }
