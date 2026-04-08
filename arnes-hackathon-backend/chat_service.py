@@ -217,7 +217,7 @@ def dispatch_tool(name: str, args: dict[str, Any]) -> Any:
 
 
 def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -235,7 +235,7 @@ def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> l
     return ranked["EID"].astype(str).tolist()
 
 def top_k_endangered_in_municipality(obcina: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -249,6 +249,21 @@ def top_k_endangered_in_municipality(obcina: str, endangerment: str, k: int = -1
         ranked = subset[scores == max_score]
     else:
         ranked = subset.nlargest(max(1, int(k)), endangerment)
+
+    return ranked["EID"].astype(str).tolist()
+
+def top_k_endangered_in_country(endangerment: str, k: int = -1):
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
+        raise ValueError("Unsupported endangerment.")
+
+    gdf = _load_gdf()
+    
+    scores = gdf[endangerment].fillna(0)
+    if k == -1:
+        max_score = scores.max()
+        ranked = gdf[scores == max_score]
+    else:
+        ranked = gdf.nlargest(max(1, int(k)), endangerment)
 
     return ranked["EID"].astype(str).tolist()
 
@@ -324,8 +339,28 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         },
         {
             "type": "function",
+            "name": "top_k_endangered_in_country",
+            "description": "Returns a list of the top endangered objects in the whole country for one endangerment type. You can also use the endangerment for a combined danger. Use this when the user asks about dangers for the whole country",
+            "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "endangerment": {
+                            "type": "string",
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
+                        },
+                        "k": {
+                            "type": "integer",
+                            "description": "How many results to return. If omitted, returns all with max score.",
+                        },
+                    },
+                    "required": ["endangerment"],
+                    "additionalProperties": False,
+                },
+        },
+        {
+            "type": "function",
             "name": "top_k_endangered_in_region",
-            "description": "Returns a list of the top endangered objects in a region for one endangerment type. You can also use this to get all heritage sites in a region by entering a large k",
+            "description": "Returns a list of the top endangered objects in a region for one endangerment type. You can also use the endangerment for a combined danger. You can also use this to get all heritage sites in a region by entering a large k",
             "parameters": {
                     "type": "object",
                     "properties": {
@@ -337,7 +372,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
                         },
                         "k": {
                             "type": "integer",
@@ -351,7 +386,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         {
             "type": "function",
             "name": "top_k_endangered_in_municipality",
-            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type. You can also use this to get all heritage sites in a municipality by entering k=-1 and any endangerment type",
+            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type. You can also use the endangerment for a combined danger. You can also use this to get all heritage sites in a municipality by entering k=-1 and any endangerment type",
             "parameters": {
                     "type": "object",
                     "properties": {
@@ -361,7 +396,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
                         },
                         "k": {
                             "type": "integer",
