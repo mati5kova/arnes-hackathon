@@ -1,0 +1,40 @@
+ssh -i ~/.ssh/id_hpc hackathon17@hpc-login.arnes.si
+test
+
+module load Python/3.11
+pip install --user huggingface_hub
+hf download cjvt/GaMS3-12B-Instruct --local-dir ~/models/GaMS3-12B-Instruct
+
+#### oddas nalogo
+sbatch run_server_arnes.sbatch GaMS3-12B-Instruct
+
+### preveri queue -> PD pomeni pending
+squeue -u $USER
+while true; do squeue -u $USER; sleep 1; done
+### ETA
+squeue -j <JOB_ID> --start
+
+### ko laufa
+cat server_log_<JOBID>.txt | grep "IP"
+### SSH tunel
+ssh -N -L 65535:<IP_iz_loga>:65535 hackathon17@hpc-login.arnes.si
+
+### HH:MM:SS format
+
+#### cancel
+scancel <JOB_ID>
+
+# zaključene naloge
+sacct -u $USER
+
+
+
+# Lokalno → HPC
+scp datoteka.py uporabnik@hpc-login.arnes.si:~/projekt/
+
+# HPC → lokalno
+scp uporabnik@hpc-login.arnes.si:~/projekt/rezultati.txt .
+
+
+python test_server.py --server_ip localhost:65535 --model /models/GaMS3-12B-Instruct
+http://localhost:65535/v1
