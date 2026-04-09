@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 import chromadb
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
 
 from dotenv import load_dotenv
 from system_prompt import SYSTEM_PROMPT
@@ -43,6 +43,7 @@ MODEL_SPECS = (
     ModelSpec("mdml-gpt5-1-001", "MDML-GPT5.1-001", "CHAT_MODEL_MDML_GPT5_1_001"),
     ModelSpec("mdml-gpt5-2-001", "MDML-GPT5.2-001", "CHAT_MODEL_MDML_GPT5_2_001"),
     ModelSpec("mdml-gpt5-nano-001", "MDML-GPT5-Nano-001", "CHAT_MODEL_MDML_GPT5_NANO_001"),
+    ModelSpec("gams-3-12b", "GaMS-3-12B-Instruct", "CHAT_MODEL_GAMS_3_12B"), #GaMS
 )
 
 EMBED_MODEL=os.getenv("MDML-TextEmbedding-003_DEPLOYMENT")
@@ -110,6 +111,25 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
     if not conversation_history:
         raise ChatServiceError("At least one chat message is required.", status_code=400)
 
+    conversation: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}, *conversation_history]
+
+    if _is_gams_model(requested_model):
+        result = _generate_gams_reply(
+            conversation=conversation,
+            model_id=requested_model,
+            config=config,
+        )
+        # samo tko za info, dejansko nepotrebno
+        _record_usage_summary(
+            model_id=config["id"],
+            model_label=config["label"],
+            deployment=config["deployment"],
+            usage=result["usage"],
+            web_search_used=False,
+        )
+        return result
+    # nadaljuj normalno preko azurja ce ni GaMS
+
     client = _create_azure_client(
         api_key=config["apiKey"],
         azure_endpoint=config["azureEndpoint"],
@@ -120,7 +140,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
     web_search_used = False
     incomplete_response_retries = 0
 
-    conversation: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}, *conversation_history]
+    
     response: Any = None
     for _ in range(CHAT_MAX_TOOL_ROUNDS + 1):
         response = client.responses.create(
@@ -607,7 +627,7 @@ def _serialize_model(spec: ModelSpec, *, default_model_id: str) -> dict[str, Any
         "deployment": config["deployment"],
         "available": config["available"],
         "missingEnv": config["missingEnv"],
-        "supportsWebSearch": True,
+        "supportsWebSearch": not _is_gams_model(spec.id),
         "isDefault": config["id"] == default_model_id,
     }
 
@@ -621,6 +641,19 @@ def _find_model_spec_by_env_prefix(env_prefix: str) -> ModelSpec | None:
 
 
 def _resolve_model_config(spec: ModelSpec) -> dict[str, Any]:
+    # GaMS — lokalni vLLM, ne potrebuje Azure konfiga
+    if spec.id.startswith("gams-"):
+        base_url = os.getenv("GAMS_BASE_URL", "http://localhost:65535/v1")
+        return {
+            "id": spec.id,
+            "label": spec.label,
+            "deployment": os.getenv("GAMS_MODEL_NAME", "GaMS3-12B-Instruct"),
+            "apiKey": "EMPTY",
+            "azureEndpoint": base_url,
+            "available": True,   # privzeto dostopen, napaka se pojavi pri klicu
+            "missingEnv": [],
+        }
+
     deployment = _read_env(f"{spec.env_prefix}_DEPLOYMENT")
     api_key = (
         _read_env(f"{spec.env_prefix}_API_KEY")
@@ -852,6 +885,76 @@ def _json_safe(value: Any) -> Any:
             return str(value)
     return value
 
+#
+# GAMS
+#
+def _is_gams_model(model_id: str) -> bool:
+    return model_id.startswith("gams-")
+
+def _create_gams_client() -> OpenAI:
+    base_url = os.getenv("GAMS_BASE_URL", "http://localhost:65535/v1")
+    return OpenAI(
+        base_url=base_url,
+        api_key="EMPTY",  # vLLM ne potrebuje pravega ključa
+    )
+
+def _generate_gams_reply(
+    *,
+    conversation: list[dict],
+    model_id: str,
+    config: dict,
+) -> dict:
+    """Koda pot za GaMS prek vLLM — brez tool callinga."""
+    client = _create_gams_client()
+    vllm_model_name = os.getenv("GAMS_MODEL_NAME", "GaMS3-12B-Instruct")
+
+    messages: list[dict[str, Any]] = []
+    for msg in conversation:
+        role = msg.get("role") or ""
+        content = msg.get("content") or ""
+        if role in ("user", "assistant", "system") and content:
+            messages.append({"role": role, "content": content})
+
+    try:
+        response = client.chat.completions.create(
+            model=vllm_model_name,
+            messages=messages,
+            temperature=0.6,
+            top_p=0.95,
+            max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+        )
+        print(response)
+    except Exception as exc:
+        raise ChatServiceError(
+            f"GaMS strežnik ni dosegljiv: {exc}. "
+            "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+            status_code=503,
+        ) from exc
+
+    text = response.choices[0].message.content or ""
+    if not text:
+        raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+
+    usage = response.usage
+    aggregated_usage = {
+        "inputTokens": getattr(usage, "prompt_tokens", 0),
+        "outputTokens": getattr(usage, "completion_tokens", 0),
+        "totalTokens": getattr(usage, "total_tokens", 0),
+        "reasoningTokens": 0,
+    }
+
+    return {
+        "model": {
+            "id": model_id,
+            "label": config["label"],
+            "deployment": vllm_model_name,
+        },
+        "content": text,
+        "citations": [],
+        "webSearchUsed": False,
+        "responseId": response.id,
+        "usage": aggregated_usage,
+    }
 
 if __name__ == "__main__":
     result = run(
