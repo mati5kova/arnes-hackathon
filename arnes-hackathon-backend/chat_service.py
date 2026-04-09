@@ -204,6 +204,8 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
                     "output": output,
                 }
             )
+            print(conversation)
+
 
     raise ChatServiceError("Tool loop limit reached before the model finished.", status_code=502)
 
@@ -229,10 +231,12 @@ def dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         return top_k_endangered_in_region(**args)
     if name == "top_k_endangered_in_municipality":
         return top_k_endangered_in_municipality(**args)
-    if name == "get_info_by_eid":
-        return get_info_by_eid(**args)
+    if name == "get_info_by_eids":
+        return get_info_by_eids(**args)
     if name == "search_heritage_records":
         return search_heritage_records(**args)
+    if name == "top_k_endangered_in_country":
+        return top_k_endangered_in_country(**args)
     raise ValueError(f"Unknown tool: {  name}")
 
 
@@ -287,20 +291,21 @@ def top_k_endangered_in_country(endangerment: str, k: int = -1):
 
     return ranked["EID"].astype(str).tolist()
 
-def get_info_by_eid(eid: str, columns: list[str] | None = None) -> dict[str, Any]:
+def get_info_by_eids(eids: list[str], columns: list[str] | None = None) -> list[dict]:
     gdf = _load_gdf()
-    subset = gdf[gdf["EID"].astype(str) == str(eid)]
-    if subset.empty:
-        raise ValueError(f"No site was found for EID '{eid}'.")
+    subset = gdf.drop(columns="geometry", errors="ignore")
+    subset = gdf[gdf["EID"].isin(eids)]
 
-    row = subset.iloc[0]
+    if subset.empty:
+        raise ValueError(f"No site was found for EIDs {eids}.")
+
     if columns:
         missing = [column for column in columns if column not in gdf.columns]
         if missing:
             raise ValueError(f"Unknown columns: {', '.join(missing)}")
-        row = row[columns]
+        subset = subset[columns]
 
-    return _json_safe(row.to_dict())
+    return subset.to_dict(orient="records")
 
 def search_heritage_records(query: str, k: int = 5):
     if embed_client is None or not EMBED_MODEL:
@@ -429,23 +434,26 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         },
         {
             "type": "function",
-            "name": "get_info_by_eid",
-            "description": "Returns information about a specific cultural heritage object by EID.",
+            "name": "get_info_by_eids",
+            "description": "Returns information about multiple or one specific cultural heritage objects by their EID. Use this when you recieve EIDs from another tool.",
             "parameters": {
                     "type": "object",
                     "properties": {
-                        "eid": {"type": "string"},
+                        "eids": {
+                            "type": "array",
+                            "items": {"type" : "string"}
+                            },
                         "columns": {
                             "type": "array",
                             "items": {
                                 "type": "string",
                                 "enum": ["ESD", "EID", "IME", "SINONIMI", "OPIS", "ZVRST", "TIP", "GESLA", "DATACIJA", "LOKACIJAOPIS", "OBCINA", "ZAVOD", "SPOMENIK", "poplave", "pozar", "plazovi", "regija", "UE_UIME", "potres", "prevladujoci_material",
-                                          'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', "danger_revision_reasoning"]
+                                          'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', "danger_revision_reasoning", "skupaj_nevarnost"]
                                 },
                             "description": "Columns to show"
                         },
                     },
-                    "required": ["eid"],
+                    "required": ["eids"],
                     "additionalProperties": False,
                 },
         },
