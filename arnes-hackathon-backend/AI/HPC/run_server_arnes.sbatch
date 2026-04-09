@@ -7,7 +7,7 @@
 #SBATCH --output=server_log_%j.txt
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:30:00                                 # particija gpu dovoli do 4 dni (HH:MM:SS format!!)
+#SBATCH --time=12:00:00                                 # particija gpu dovoli do 4 dni (HH:MM:SS format!!)
 #SBATCH --cpus-per-task=8                               # V100S vozlišča: AMD EPYC 7272
 #SBATCH --mem=64G                                       # 12B model potrebuje cca 24 GB VRAM + RAM
 #SBATCH --gres=gpu:1                                    # 1x GPU 
@@ -59,4 +59,7 @@ python3 -m vllm.entrypoints.openai.api_server \
     --model "${MODELS_DIR}/${model_name}" \
     --host "0.0.0.0" \                          # poslušaj na vseh omrežnih vmesnikih
     --port ${vllm_port_number} \
-    --tensor-parallel-size 1
+    --tensor-parallel-size 1 \
+    --enable-auto-tool-choice \
+    --tool-call-parser pythonic \
+    --attention-backend flash_attn   # na hugginface je priporocen flash attention

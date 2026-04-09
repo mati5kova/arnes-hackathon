@@ -17,7 +17,7 @@ squeue -j <JOB_ID> --start
 ### ko laufa
 cat server_log_<JOBID>.txt | grep "IP"
 ### SSH tunel
-ssh -N -L 65535:<IP_iz_loga>:65535 hackathon17@hpc-login.arnes.si
+ssh -N -L 65535:<IP_iz_loga | node_name npr. gwn09>:65535 hackathon17@hpc-login.arnes.si
 
 ### HH:MM:SS format
 
@@ -28,13 +28,31 @@ scancel <JOB_ID>
 sacct -u $USER
 
 
-
 # Lokalno → HPC
 scp datoteka.py uporabnik@hpc-login.arnes.si:~/projekt/
+
+scp run_server_arnes.sbatch hackathon17@hpc-login.arnes.si:~
 
 # HPC → lokalno
 scp uporabnik@hpc-login.arnes.si:~/projekt/rezultati.txt .
 
 
-python test_server.py --server_ip localhost:65535 --model /models/GaMS3-12B-Instruct
-http://localhost:65535/v1
+
+# -------------------------- #
+TERMINAL1:
+ssh -i ~/.ssh/id_hpc hackathon17@hpc-login.arnes.si
+squeue -u $USER
+-> status R(unning) in vzami JOB_ID
+cat server_log_<JOB_ID>.txt | grep "IP"
+# preveri ce deluje vLLM streznik
+curl http://<instance_name npr. gwn09>:65535/v1/models
+
+TERMINAL2:
+# -N -> ne shell ampak samo tunel, -L port
+ssh -i ~/.ssh/id_hpc -N -L 65535:<IP_iz_loga | node_name npr. gwn09>:65535 hackathon17@hpc-login.arnes.si
+
+TERMINAL3:
+# na mbp preveri ce lahko dostopas
+curl http://localhost:65535/v1/models
+python3 test_server.py --server_ip localhost:65535 --model /d/hpc/home/hackathon17/models/GaMS3-12B-Instruct
+# -------------------------- #

@@ -43,7 +43,7 @@ MODEL_SPECS = (
     ModelSpec("mdml-gpt5-1-001", "MDML-GPT5.1-001", "CHAT_MODEL_MDML_GPT5_1_001"),
     ModelSpec("mdml-gpt5-2-001", "MDML-GPT5.2-001", "CHAT_MODEL_MDML_GPT5_2_001"),
     ModelSpec("mdml-gpt5-nano-001", "MDML-GPT5-Nano-001", "CHAT_MODEL_MDML_GPT5_NANO_001"),
-    ModelSpec("gams-3-12b", "GaMS-3-12B-Instruct", "CHAT_MODEL_GAMS_3_12B"), #GAMS
+    ModelSpec("gams-3-12b", "GaMS-3-12B-Instruct", "CHAT_MODEL_GAMS_3_12B"), #GaMS
 )
 
 EMBED_MODEL=os.getenv("MDML-TextEmbedding-003_DEPLOYMENT")
@@ -119,6 +119,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
             model_id=requested_model,
             config=config,
         )
+        # samo tko za info, dejansko nepotrebno
         _record_usage_summary(
             model_id=config["id"],
             model_label=config["label"],
@@ -127,6 +128,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
             web_search_used=False,
         )
         return result
+    # nadaljuj normalno preko azurja ce ni GaMS
 
     client = _create_azure_client(
         api_key=config["apiKey"],
@@ -886,6 +888,7 @@ def _generate_gams_reply(
             top_p=0.95,
             max_tokens=CHAT_MAX_OUTPUT_TOKENS,
         )
+        print(response)
     except Exception as exc:
         raise ChatServiceError(
             f"GaMS strežnik ni dosegljiv: {exc}. "
