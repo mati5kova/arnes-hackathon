@@ -204,6 +204,8 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
                     "output": output,
                 }
             )
+            print(conversation)
+
 
     raise ChatServiceError("Tool loop limit reached before the model finished.", status_code=502)
 
@@ -229,15 +231,17 @@ def dispatch_tool(name: str, args: dict[str, Any]) -> Any:
         return top_k_endangered_in_region(**args)
     if name == "top_k_endangered_in_municipality":
         return top_k_endangered_in_municipality(**args)
-    if name == "get_info_by_eid":
-        return get_info_by_eid(**args)
+    if name == "get_info_by_eids":
+        return get_info_by_eids(**args)
     if name == "search_heritage_records":
         return search_heritage_records(**args)
+    if name == "top_k_endangered_in_country":
+        return top_k_endangered_in_country(**args)
     raise ValueError(f"Unknown tool: {  name}")
 
 
 def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -255,7 +259,7 @@ def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> l
     return ranked["EID"].astype(str).tolist()
 
 def top_k_endangered_in_municipality(obcina: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -272,20 +276,36 @@ def top_k_endangered_in_municipality(obcina: str, endangerment: str, k: int = -1
 
     return ranked["EID"].astype(str).tolist()
 
-def get_info_by_eid(eid: str, columns: list[str] | None = None) -> dict[str, Any]:
-    gdf = _load_gdf()
-    subset = gdf[gdf["EID"].astype(str) == str(eid)]
-    if subset.empty:
-        raise ValueError(f"No site was found for EID '{eid}'.")
+def top_k_endangered_in_country(endangerment: str, k: int = -1):
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
+        raise ValueError("Unsupported endangerment.")
 
-    row = subset.iloc[0]
+    gdf = _load_gdf()
+    
+    scores = gdf[endangerment].fillna(0)
+    if k == -1:
+        max_score = scores.max()
+        ranked = gdf[scores == max_score]
+    else:
+        ranked = gdf.nlargest(max(1, int(k)), endangerment)
+
+    return ranked["EID"].astype(str).tolist()
+
+def get_info_by_eids(eids: list[str], columns: list[str] | None = None) -> list[dict]:
+    gdf = _load_gdf()
+    subset = gdf.drop(columns="geometry", errors="ignore")
+    subset = gdf[gdf["EID"].isin(eids)]
+
+    if subset.empty:
+        raise ValueError(f"No site was found for EIDs {eids}.")
+
     if columns:
         missing = [column for column in columns if column not in gdf.columns]
         if missing:
             raise ValueError(f"Unknown columns: {', '.join(missing)}")
-        row = row[columns]
+        subset = subset[columns]
 
-    return _json_safe(row.to_dict())
+    return subset.to_dict(orient="records")
 
 def search_heritage_records(query: str, k: int = 5):
     if embed_client is None or not EMBED_MODEL:
@@ -344,8 +364,28 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         },
         {
             "type": "function",
+            "name": "top_k_endangered_in_country",
+            "description": "Returns a list of the top endangered objects in the whole country for one endangerment type. You can also use the endangerment for a combined danger. Use this when the user asks about dangers for the whole country",
+            "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "endangerment": {
+                            "type": "string",
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
+                        },
+                        "k": {
+                            "type": "integer",
+                            "description": "How many results to return. If omitted, returns all with max score.",
+                        },
+                    },
+                    "required": ["endangerment"],
+                    "additionalProperties": False,
+                },
+        },
+        {
+            "type": "function",
             "name": "top_k_endangered_in_region",
-            "description": "Returns a list of the top endangered objects in a region for one endangerment type. You can also use this to get all heritage sites in a region by entering a large k",
+            "description": "Returns a list of the top endangered objects in a region for one endangerment type. You can also use the endangerment for a combined danger. You can also use this to get all heritage sites in a region by entering a large k",
             "parameters": {
                     "type": "object",
                     "properties": {
@@ -357,7 +397,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
                         },
                         "k": {
                             "type": "integer",
@@ -371,7 +411,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         {
             "type": "function",
             "name": "top_k_endangered_in_municipality",
-            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type. You can also use this to get all heritage sites in a municipality by entering k=-1 and any endangerment type",
+            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type. You can also use the endangerment for a combined danger. You can also use this to get all heritage sites in a municipality by entering k=-1 and any endangerment type",
             "parameters": {
                     "type": "object",
                     "properties": {
@@ -381,7 +421,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
                         },
                         "k": {
                             "type": "integer",
@@ -394,23 +434,26 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         },
         {
             "type": "function",
-            "name": "get_info_by_eid",
-            "description": "Returns information about a specific cultural heritage object by EID.",
+            "name": "get_info_by_eids",
+            "description": "Returns information about multiple or one specific cultural heritage objects by their EID. Use this when you recieve EIDs from another tool.",
             "parameters": {
                     "type": "object",
                     "properties": {
-                        "eid": {"type": "string"},
+                        "eids": {
+                            "type": "array",
+                            "items": {"type" : "string"}
+                            },
                         "columns": {
                             "type": "array",
                             "items": {
                                 "type": "string",
                                 "enum": ["ESD", "EID", "IME", "SINONIMI", "OPIS", "ZVRST", "TIP", "GESLA", "DATACIJA", "LOKACIJAOPIS", "OBCINA", "ZAVOD", "SPOMENIK", "poplave", "pozar", "plazovi", "regija", "UE_UIME", "potres", "prevladujoci_material",
-                                          'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', "danger_revision_reasoning"]
+                                          'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', "danger_revision_reasoning", "skupaj_nevarnost"]
                                 },
                             "description": "Columns to show"
                         },
                     },
-                    "required": ["eid"],
+                    "required": ["eids"],
                     "additionalProperties": False,
                 },
         },
