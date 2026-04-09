@@ -111,4 +111,4 @@ Do not open `dist/index.html` directly with `file://`; serve it through an HTTP 
 - Overlay data is exposed through `GET /api/overlays` and `GET /api/overlays/{kind}` (`fire`, `flood`, `air`, `landslide`), with viewport/zoom aggregation for map performance. Heavy area overlays (`flood`, `landslide`) use low-zoom grid rendering for faster responses and keep polygon detail at higher zoom.
 - Chat endpoints are available at `GET /api/chat/models`, `GET /api/chat/usage`, and `POST /api/chat`.
 - Backend dev dependencies are listed in `arnes-hackathon-backend/requirements-dev.txt`.
-- More detailed run notes are in `arnes-hackathon-frontend/RUN.md` and `arnes-hackathon-backend/backedn.md`.
+- More detailed run notes are in `arnes-hackathon-frontend/RUN.md` and `arnes-hackathon-backend/backend.md`.
