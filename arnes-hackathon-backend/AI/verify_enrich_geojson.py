@@ -1307,6 +1307,13 @@ def main() -> None:
         json.dump(data, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
 
+     # skupna_ocena
+    gdf = gpd.read_file("./Data/kd_z_nevarnost_enriched_verified.geojson")
+    gdf['pozar_ocena_popravljena'] = 4 - gdf['pozar_ocena_popravljena']
+    gdf['potres_ocena_popravljena'] = 2 * gdf['potres_ocena_popravljena']
+    gdf['skupaj_nevarnost'] = gdf['pozar_ocena_popravljena'] + gdf['poplave_ocena_popravljena'] + gdf['plazovi_ocena_popravljena'] + gdf['potres_ocena_popravljena']
+    gdf.to_file("./Data/kd_z_nevarnost_enriched_verified.geojson", driver="GeoJSON")
+
     print(f"Wrote {len(features)} features to {OUTPUT_PATH}")
 
 
