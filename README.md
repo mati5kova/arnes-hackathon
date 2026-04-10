@@ -2,15 +2,26 @@
 
 Ta repozitorij vsebuje vse podatke, cevovode za obdelavo podatkov in kodo potrebno za lokalni zagon aplikacije.
 
+## Zmogljivosti končnega izdelka
+
+- Izdelan cevovod za pridobitev in obdelavo podatkov
+- Klepetalni robot (GaMS3-12B ali GPT5.2), s katerim uporabnik lažje navigira in pridobiva informacije o kulturni dediščini
+- Dovršen ti. tool-calling dostop do dopolnjenega registra. Pri modelu GaMS smo uporabili drugačen pristop k tool-callanju, ker model te zmogljivosti še ne podpira
+- Dovršena vektorska baza z zapisi o kulturni dediščini preko katere klepetalnik izvaja RAG (Retrieval-Augmented Generation)
+- Interaktivni zemljevid s sloji za posamezno ogroženost (poplave, plazovi, požari, onesnaženost zraka)
+
 ## Struktura repozitorija
 
 - `arnes-hackathon-backend/` FastAPI API, obdelava podatkov, chat_service.py, vektorska baza Chroma, ...
 - `arnes-hackathon-frontend/` React uporabniški vmesnik, sloji ogroženosti, klepetalnik, ...
 
 ## Pomembnejše datoteke
-- `arnes-hackathon-backend/rnpd`
-- ``
-- ``
+
+- `arnes-hackathon-backend/main.py`
+- `arnes-hackathon-backend/rnpd_service.py`
+- `arnes-hackathon-backend/chat_service.py`
+- `arnes-hackathon-backend/makeEmbedding.py`
+- `arnes-hackathon-backend/AI/verify_enrich_geojson.py`
 
 ## Potrebna orodja in okolja
 
@@ -28,6 +39,14 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
+```
+
+Ker so obdelani podatki preprosto preveliki za shrambo na Github-u najprej poženemo cevovod za obogatitev, ki datoteko ustvari, če le ta še ne obstaja.
+Datoteka združenih zapisov s podatki iz OPSI-ja in nadmorskimi višinami ipd. je bila še dovolj majhna, da je shranjena v kd_visine.geojson, zato je za zaključek cevovoda podatkov potrebno le še:
+
+```bash
+cd arnes-hackathon-backend/AI
+python verify_enrich_geojson.py
 ```
 
 Poženemo FastAPI strežnik:
@@ -101,13 +120,4 @@ npm run build
 npm run preview
 ```
 
-Do not open `dist/index.html` directly with `file://`; serve it through an HTTP server.
-
-## Notes
-
-- Backend data is local-first and uses `arnes-hackathon-backend/rnpd.json` by default.
-- The chat assistant also uses `arnes-hackathon-backend/AI/Data/kd_z_nevarnost.geojson` for local heritage-risk lookups.
-- Overlay data is exposed through `GET /api/overlays` and `GET /api/overlays/{kind}` (`fire`, `flood`, `air`, `landslide`), with viewport/zoom aggregation for map performance. Heavy area overlays (`flood`, `landslide`) use low-zoom grid rendering for faster responses and keep polygon detail at higher zoom.
-- Chat endpoints are available at `GET /api/chat/models`, `GET /api/chat/usage`, and `POST /api/chat`.
-- Backend dev dependencies are listed in `arnes-hackathon-backend/requirements-dev.txt`.
-- More detailed run notes are in `arnes-hackathon-frontend/RUN.md` and `arnes-hackathon-backend/backend.md`.
+Ne odpiraj `dist/index.html` direktno z `file://` ampak serviraj skozi HTTP strežnik.
