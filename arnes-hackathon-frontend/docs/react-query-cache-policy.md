@@ -1,34 +1,25 @@
-# React Query Cache Policy
+# React query cache policy
 
-This document defines the cache policy for map-related API queries.
+V tem dokumentu so prisotne vse definicije za obnašanje React query predpomnilnika navezujoče na API poizvedbe.
 
-## Endpoints and Policies
+## Endpoints
 
-| Query key | Endpoint | staleTime | gcTime | refetchOnWindowFocus | refetchOnMount | refetchOnReconnect | Reasoning |
-| --- | --- | ---: | ---: | --- | --- | --- | --- |
-| `["heritage-sites", "markers", bbox, zoom]` | `GET /api/heritage-sites?bbox=...&zoom=...` | `Infinity` | `10m` | `false` | `false` | `false` | Source data is static enough to avoid automatic network refreshes for revisits. |
-| `["overlay-grid", kind, bbox, zoom]` | `GET /api/overlays/{kind}?bbox=...&zoom=...` | `45s` | `10m` | `false` | `false` | `false` | Overlay cells are viewport/zoom-derived and should stay fresh for short map navigation windows while avoiding noisy refetches. |
-| `["heritage-sites", "search", search]` | `GET /api/heritage-sites?search=...&limit=20` | `Infinity` | `5m` | `false` | `false` | `false` | Search responses are deterministic for the current dataset snapshot. |
-| `["heritage-site", siteId]` | `GET /api/heritage-sites/{siteId}` | `Infinity` | `30m` | `false` | `false` | `false` | Detail metadata is static and benefits from aggressive client reuse. |
-| `["api-health"]` | `GET /api/health` | `0` | `1m` | n/a (interval-driven) | n/a (interval-driven) | n/a (interval-driven) | Startup/readiness probe. Polled every `2s` while dataset is loading/not-ready, or while marker query is still fetching/error. Stops once backend is ready and markers are healthy. |
+| Query key                                   | Endpoint                                      |  staleTime | gcTime | refetchOnWindowFocus | refetchOnMount | refetchOnReconnect | Reasoning                                                                                                     |
+| ------------------------------------------- | --------------------------------------------- | ---------: | -----: | -------------------- | -------------- | ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `["heritage-sites", "markers", bbox, zoom]` | `GET /api/heritage-sites?bbox=...&zoom=...`   | `Infinity` |  `10m` | `false`              | `false`        | `false`            | Izvorno podatki so dovolj statični da se lahko izognemo avtomatskemu "network refreshu" pri ponovnih obiskih. |
+| `["overlay-grid", kind, bbox, zoom]`        | `GET /api/overlays/{kind}?bbox=...&zoom=...`  |      `45s` |  `10m` | `false`              | `false`        | `false`            | "Overlay" celice so lahko shranjene da se izgonemo ponovnem nalaganjo ob hitrih premikih znotraj zemljevida.  |
+| `["heritage-sites", "search", search]`      | `GET /api/heritage-sites?search=...&limit=20` | `Infinity` |   `5m` | `false`              | `false`        | `false`            | Odgovori na iskanja so deterministični.                                                                       |
+| `["heritage-site", siteId]`                 | `GET /api/heritage-sites/{siteId}`            | `Infinity` |  `30m` | `false`              | `false`        | `false`            | Podrobni meta podatki so statični in je priročno da so v predpomnilniku.                                      |
 
-## Cold-Start Retry Policy
+## Politika ponovnega poizkusa za hladen zagon
 
-To prevent false errors during backend startup, map queries also use retry with exponential backoff:
+Da se izognemo krivim napakam med zagonom zalednega dela "queriji" ki se nanašajo na zemljevid tudi uporabljajo ponovni poizkus z eksponentno "backoff" strategijo:
 
-- Max retries: `120`
-- Delay: `500ms` doubling up to `5s`
-- Retries on:
-  - HTTP `5xx` (`ApiError`)
-  - network startup failures (`TypeError`, "Failed to fetch")
-- Does not retry on request aborts
-- Markers query additionally keeps recovery polling every `3s` while in error state.
-- Health query runs without retries (`retry: false`) and relies on interval polling conditions.
+- Maksimalno število poizkusov: `120`
+- Zakasnitev: `500ms` s podvajanjem do `5s`
+- Ponovni poizkus ob:
+    - HTTP `5xx` (`ApiError`)
+    - network startup failures (`TypeError`, "Failed to fetch")
+- Ni ponovnih poizkusov ob prekinitvah requestov
 
-## Source of Truth
-
-The executable policy lives in:
-
-- `src/components/heritage-map/use-heritage-map-data.ts`
-
-The `QUERY_CACHE_POLICY` object in that file should be updated together with this document whenever cache behavior changes.
+Beri `src/components/heritage-map/use-heritage-map-data.ts`
