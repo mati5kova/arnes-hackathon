@@ -1,4 +1,4 @@
-# Logs
+# logiranje
 logs
 *.log
 npm-debug.log*
@@ -7,6 +7,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# okolje
 node_modules
 dist
 dist-ssr
@@ -17,7 +18,6 @@ coverage
 .env.*
 !.env.example
 
-# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea

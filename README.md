@@ -1,54 +1,56 @@
-# Arnes Hackathon
+# Arnes Hackathon: Kulturko - UI za klasifikacijo ogroženosti kulturne dediščine
 
-This repository contains a FastAPI backend for Slovenian cultural heritage data and a React/Vite frontend for the map UI.
+Ta repozitorij vsebuje vse podatke, cevovode za obdelavo podatkov in kodo potrebno za lokalni zagon aplikacije.
 
-## Repository Structure
+## Struktura repozitorija
 
-- `arnes-hackathon-backend/` FastAPI API, dataset loading, backend tests
-- `arnes-hackathon-frontend/` React application, frontend tests
+- `arnes-hackathon-backend/` FastAPI API, obdelava podatkov, chat_service.py, vektorska baza Chroma, ...
+- `arnes-hackathon-frontend/` React uporabniški vmesnik, sloji ogroženosti, klepetalnik, ...
 
-## Prerequisites
+## Pomembnejše datoteke
+- `arnes-hackathon-backend/rnpd`
+- ``
+- ``
+
+## Potrebna orodja in okolja
 
 - Python 3.11+
 - Node.js 18+
 - npm
 
-## Backend Setup
+## Zagon zalednega dela
 
-From the repository root:
+Iz korena `arnes-hackathon/` izvedemo:
 
 ```bash
 cd arnes-hackathon-backend
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Run the backend:
+Poženemo FastAPI strežnik:
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8787 --reload
 ```
 
-For chat, configure Azure OpenAI in `arnes-hackathon-backend/.env`.
+Za klepetalnik je potrebna dodatna konfiguracija za Azure OpenAI znotraj `arnes-hackathon-backend/.env`.
 
-- Set `AZURE_OPENAI_BASE_URL` to your Azure resource URL ending with `/openai/v1/`
-- Set `AZURE_OPENAI_API_KEY` to a shared key/token, or set per-model `CHAT_MODEL_*_API_KEY`
-- Keep or edit the provided `CHAT_MODEL_*_DEPLOYMENT` values to match your Azure deployment names
-- The frontend model picker is populated from `GET /api/chat/models`
-- The web-search toggle enables Azure's `web_search_preview` tool per request
-- Per-model token totals are persisted to `arnes-hackathon-backend/logs/chat-usage-summary.json` by default and exposed via `GET /api/chat/usage`
+- Nastavi `AZURE_OPENAI_BASE_URL` na tvoj Azure oddaljen vir (URL) ki se konča z `/openai/v1/`
+- Nastavi `AZURE_OPENAI_API_KEY` na tvoj deljen ali pa 'per model' ključ `CHAT_MODEL_*_API_KEY`
+- Nastavi ali ohrani privzete `CHAT_MODEL_*_DEPLOYMENT` vrednosti da ustrezajo tvojim
 
-Available locally at:
+Lokalno dostopno na:
 
 - API: `http://127.0.0.1:8787`
 - Swagger UI: `http://127.0.0.1:8787/docs`
 - ReDoc: `http://127.0.0.1:8787/redoc`
 
-## Frontend Setup
+## Vzpostavitev uporabniškega vmesnika
 
-Open a second terminal, then:
+V drugem terminalu:
 
 ```bash
 cd arnes-hackathon-frontend
@@ -57,44 +59,41 @@ npm install
 npm run dev
 ```
 
-The frontend runs locally at:
+Lokalno dostopno na:
 
 - `http://localhost:8080`
 
-By default, frontend development expects the backend at `http://localhost:8787`.
-
-If needed, you can point the frontend to a different backend:
+Privzeto aplikacija zaledni del pričakuje na naslovu `http://localhost:8787`.
+Po potrebi lahko to obnašanje tudi spremenimo z:
 
 ```bash
 API_PROXY_TARGET=http://127.0.0.1:8787 npm run dev
 ```
 
-Or create `arnes-hackathon-frontend/.env.local` with:
+Ali ustvarimo `arnes-hackathon-frontend/.env.local` z:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8787
 ```
 
-## Running Tests
+## Poganjanje testov
 
-Backend:
+Zaledni del:
 
 ```bash
 cd arnes-hackathon-backend
 source .venv/bin/activate
-pytest -q
+pytest
 ```
 
-Frontend:
+Čelni del:
 
 ```bash
 cd arnes-hackathon-frontend
 npm test
 ```
 
-## Production Build
-
-Frontend production build:
+## "Production build"
 
 ```bash
 cd arnes-hackathon-frontend

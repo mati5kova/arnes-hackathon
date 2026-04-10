@@ -1,4 +1,3 @@
-# Python env and caches
 .venv/
 venv/
 __pycache__/
@@ -9,15 +8,12 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Local env files
 .env
 .env.*
 !.env.example
 
-# Generated dataset artifact
 rnpd.preprocessed.json
 
-# Generated local enrichment artifact
 AI/Data/kd_z_nevarnost_enriched_verified.geojson
 DRSV_HIDRO5_LIN_PV/
 chroma_db/

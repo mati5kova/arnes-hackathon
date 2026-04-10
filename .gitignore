@@ -1,21 +1,21 @@
-# OS/editor noise
+# OS/editor šum
 .DS_Store
 *.swp
 *.swo
 
-# Environment files
+# okoljska konfiguracija
 .env
 .env.*
 !.env.example
 
-# Node/Vite outputs
+# Node/Vite izhod
 **/node_modules/
 **/dist/
 **/dist-ssr/
 **/.vite/
 **/coverage/
 
-# Python caches/envs
+# Python predpomnilnik in okolje
 **/__pycache__/
 **/*.py[cod]
 **/.pytest_cache/
@@ -26,7 +26,7 @@
 **/.venv/
 **/venv/
 
-# Backend generated data
+# Ustvarjeni podatki zalednega dela
 arnes-hackathon-backend/rnpd.preprocessed.json
 arnes-hackathon-backend/logs/*
 arnes-hackathon-backend/AI/Data/kd_z_nevarnost_enriched_verified.geojson
