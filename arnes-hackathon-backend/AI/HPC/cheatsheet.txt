@@ -31,10 +31,10 @@ sacct -u $USER
 # Lokalno → HPC
 scp datoteka.py uporabnik@hpc-login.arnes.si:~/projekt/
 
-scp run_server_arnes.sbatch hackathon17@hpc-login.arnes.si:~
+scp -i ~/.ssh/id_hpc ~/Documents/dev/arnes-hackathon/arnes-hackathon-backend/AI/HPC/run_server_arnes.sbatch hackathon17@hpc-login.arnes.si:~
 
 # HPC → lokalno
-scp uporabnik@hpc-login.arnes.si:~/projekt/rezultati.txt .
+scp hackathon17@hpc-login.arnes.si:~/projekt/rezultati.txt .
 
 
 

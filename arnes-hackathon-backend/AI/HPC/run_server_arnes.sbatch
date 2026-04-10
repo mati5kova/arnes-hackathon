@@ -3,14 +3,14 @@
 # run_server_arnes.sbatch  - vLLM strežnik na Arnes HPC
 # original: run_server_single.sbatch (LEONARDO) (hvala Domen Vreš)
 
-#SBATCH --job-name=vllm_server                         # job mora imeti neko ime, potem vidno v npr `squeue -u $USER`
+#SBATCH --job-name=vllm_server_tools                         # job mora imeti neko ime, potem vidno v npr `squeue -u $USER`
 #SBATCH --output=server_log_%j.txt
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=12:00:00                                 # particija gpu dovoli do 4 dni (HH:MM:SS format!!)
 #SBATCH --cpus-per-task=8                               # V100S vozlišča: AMD EPYC 7272
 #SBATCH --mem=64G                                       # 12B model potrebuje cca 24 GB VRAM + RAM
-#SBATCH --gres=gpu:1                                    # 1x GPU 
+#SBATCH --gres=gpu:2                                    # 2x GPU 
 #SBATCH --partition=gpu                                 # treba dati tako
 
 
@@ -57,9 +57,9 @@ echo "-------------------------------------------------------"
 # 3. zažene HTTP strežnik
 python3 -m vllm.entrypoints.openai.api_server \
     --model "${MODELS_DIR}/${model_name}" \
-    --host "0.0.0.0" \                          # poslušaj na vseh omrežnih vmesnikih
+    --host "0.0.0.0" \
     --port ${vllm_port_number} \
-    --tensor-parallel-size 1 \
+    --tensor-parallel-size 2 \
     --enable-auto-tool-choice \
     --tool-call-parser pythonic \
-    --attention-backend flash_attn   # na hugginface je priporocen flash attention
+    --max-model-len 40816
