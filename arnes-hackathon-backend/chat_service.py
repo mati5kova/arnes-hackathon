@@ -9,9 +9,11 @@ from threading import Lock
 from typing import Any
 import chromadb
 from openai import AzureOpenAI, OpenAI
+import re
+from json_repair import repair_json
 
 from dotenv import load_dotenv
-from system_prompt import SYSTEM_PROMPT
+from system_prompt import SYSTEM_PROMPT, GAMS_SYSTEM_PROMPT
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -93,6 +95,12 @@ def get_default_chat_model_id() -> str:
 def get_chat_usage_summary() -> dict[str, Any]:         # za /logs
     return _read_usage_summary()
 
+def extract_json(text: str) -> str:
+    # Remove markdown code fences
+    text = re.sub(r"^```(?:json)?\s*", "", text.strip())
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
 
 def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None = None, use_web_search: bool) -> dict[str, Any]:
     requested_model = (model_id or get_default_chat_model_id()).strip()
@@ -111,8 +119,9 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
     if not conversation_history:
         raise ChatServiceError("At least one chat message is required.", status_code=400)
 
-    conversation: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}, *conversation_history]
-
+    SYS_PROMPT = GAMS_SYSTEM_PROMPT if _is_gams_model(requested_model) else SYSTEM_PROMPT
+    conversation: list[dict[str, Any]] = [{"role": "system", "content": SYS_PROMPT}, *conversation_history]
+    print(conversation)
     if _is_gams_model(requested_model):
         result = _generate_gams_reply(
             conversation=conversation,
@@ -129,6 +138,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
         )
         return result
     # nadaljuj normalno preko azurja ce ni GaMS
+
 
     client = _create_azure_client(
         api_key=config["apiKey"],
@@ -153,9 +163,9 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
 
         response_items = _response_output_items(response)
         tool_calls = [item for item in response_items if getattr(item, "type", "") == "function_call"]
-        web_search_used = web_search_used or any(
-            getattr(item, "type", "") == "web_search_call" for item in response_items
-        )
+        # web_search_used = web_search_used or any(
+        #     getattr(item, "type", "") == "web_search_call" for item in response_items
+        # )
 
         if not tool_calls:
             text, citations, response_status = _extract_text_and_citations_from_response(response)
@@ -204,8 +214,6 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
                     "output": output,
                 }
             )
-            print(conversation)
-
 
     raise ChatServiceError("Tool loop limit reached before the model finished.", status_code=502)
 
@@ -917,10 +925,14 @@ def _generate_gams_reply(
     vllm_model_name = os.getenv("GAMS_MODEL_NAME", "GaMS3-12B-Instruct")
 
     messages: list[dict[str, Any]] = []
+
+    messages.append({"role": "user", "content": GAMS_SYSTEM_PROMPT})
+    messages.append({"role": "assistant", "content": "Sedaj bom popolnoma sledil tvojim navodilom in odgovarjal v dogovorjenem JSON formatu"})
+
     for msg in conversation:
         role = msg.get("role") or ""
         content = msg.get("content") or ""
-        if role in ("user", "assistant", "system") and content:
+        if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content})
 
     try:
@@ -931,7 +943,6 @@ def _generate_gams_reply(
             top_p=0.95,
             max_tokens=CHAT_MAX_OUTPUT_TOKENS,
         )
-        print(response)
     except Exception as exc:
         raise ChatServiceError(
             f"GaMS strežnik ni dosegljiv: {exc}. "
@@ -942,7 +953,61 @@ def _generate_gams_reply(
     text = response.choices[0].message.content or ""
     if not text:
         raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+    print(text)
+    
+    #text = strip_non_json(text)     #zbirse ce slucajno poleg jsona vrne se kaj drugega
+    parsed_resp = json.loads(repair_json(extract_json(text)), strict=False)
+    
+    
+    while "tool" in parsed_resp:
+        args = {}
+        if parsed_resp["tool"] == "search_heritage_records":
+            params = ["query", "k"]
+        elif parsed_resp["tool"] == "top_k_endangered_in_region":
+            params = ["regija", "endangerment", "k"]
+        elif parsed_resp["tool"] == "top_k_endangered_in_municipality":
+            params = ["obcina", "endangerment", "k"]
+        elif parsed_resp["tool"] == "get_info_by_eids":
+            params = ["eids", "columns"]
+        
+        kwargs = dict(zip(params, parsed_resp["arguments"]))
 
+        result = dispatch_tool(parsed_resp["tool"], kwargs)
+        output = json.dumps(result, ensure_ascii=False, default=str)
+        msg = f'"funcito_call": "{parsed_resp["tool"]}" "output": "{output}"'
+
+        if "k_endangered" in parsed_resp["tool"]:
+            msg += '"nasvet": "Dobil si EID-je. Lahko uporabis urodje "get_info_by_eids" za vec informacij, ki bodo zelo uporabne"'
+
+        
+        messages.append({"role": "assistant", "content": f"{parsed_resp}"})
+        messages.append({"role": "user", "content": f"{msg}"})
+        try:
+            response = client.chat.completions.create(
+            model=vllm_model_name,
+            messages=messages,
+            temperature=0.6,
+            top_p=0.95,
+            max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+        )
+        except Exception as exc:
+            raise ChatServiceError(
+                f"GaMS strežnik ni dosegljiv: {exc}. "
+                "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+                status_code=503,
+            ) from exc
+        
+        text = response.choices[0].message.content or ""
+        print(text)
+        if not text:
+            raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+        
+        parsed_resp = json.loads(repair_json(extract_json(text)), strict=False)
+
+    if "status" in parsed_resp:
+        if parsed_resp["status"] == "finished":
+            text = parsed_resp["content"]
+    
     usage = response.usage
     aggregated_usage = {
         "inputTokens": getattr(usage, "prompt_tokens", 0),
