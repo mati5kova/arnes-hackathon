@@ -1,12 +1,12 @@
 const COLOR_STOPS = [
-	{ at: 0.0, color: "#2b8a3e" },
-	{ at: 0.45, color: "#0c8599" },
-	{ at: 0.75, color: "#1d4ed8" },
-	{ at: 1.0, color: "#c92a2a" },
+	{ at: 0.0,  color: "#2b8a3e" }, // zelena -> mala ogrozenost
+	{ at: 0.33, color: "#f59f00" }, // rumena -> neki srednjega
+	{ at: 0.66, color: "#e8590c" }, // oranzna -> huje
+	{ at: 1.0,  color: "#c92a2a" }, // rdeca -> kriticno
 ] as const;
 
 export const OVERLAY_SCALE_GRADIENT =
-	"linear-gradient(90deg, #2b8a3e 0%, #0c8599 45%, #1d4ed8 75%, #c92a2a 100%)";
+	"linear-gradient(90deg, #2b8a3e 0%, #f59f00 33%, #e8590c 66%, #c92a2a 100%)";
 
 export function getOverlayFillColor(normalized: number) {
 	const clamped = clamp(normalized, 0, 1);
