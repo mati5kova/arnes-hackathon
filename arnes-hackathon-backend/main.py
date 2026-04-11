@@ -195,10 +195,6 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage] = Field(description="Conversation history in chronological order.")
     modelId: str = Field(description="Selected frontend model identifier.", examples=["mdml-gpt5-001"])
-    useWebSearch: bool = Field(
-        default=False,
-        description="Enable Azure web-search tool (`web_search_preview`) for this request.",
-    )
 
 
 class ChatResponse(BaseModel):

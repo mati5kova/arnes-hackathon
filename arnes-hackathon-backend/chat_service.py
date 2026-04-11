@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from uuid import uuid4
 import chromadb
 from openai import AzureOpenAI, OpenAI
 import re
@@ -193,7 +194,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
                 "content": text,
                 "citations": citations,
                 "webSearchUsed": web_search_used,
-                "responseId": getattr(response, "id", None),
+                "responseId": _resolve_response_id(response),
                 "usage": aggregated_usage,
             }
 
@@ -231,6 +232,16 @@ def run(
         model_id=model or get_default_chat_model_id(),
         use_web_search=use_web_search,
     )
+
+
+def _resolve_response_id(response: Any) -> str:
+    raw_response_id = getattr(response, "id", None)
+    if isinstance(raw_response_id, str):
+        response_id = raw_response_id.strip()
+        if response_id:
+            return response_id
+    timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return f"local-{timestamp_ms}-{uuid4().hex[:8]}"
 
 
 def dispatch_tool(name: str, args: dict[str, Any]) -> Any:

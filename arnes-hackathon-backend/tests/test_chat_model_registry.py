@@ -91,6 +91,43 @@ def test_generate_chat_reply_uses_selected_model_configuration(monkeypatch):
     assert "Selected model reply." in result["content"]
 
 
+def test_generate_chat_reply_generates_local_response_id_when_provider_id_missing(monkeypatch):
+    monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_DEPLOYMENT", "MDML-GPT4o-Mini-001")
+    monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_API_KEY", "mini-key")
+    monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_BASE_URL", "https://mini-resource.openai.azure.com/openai/v1/")
+
+    class FakeResponse:
+        id = None
+        output = []
+        output_text = '<div class="kulturko-response"><p>Fallback id reply.</p></div>'
+        usage = SimpleNamespace(
+            input_tokens=5,
+            output_tokens=4,
+            total_tokens=9,
+            output_tokens_details=SimpleNamespace(reasoning_tokens=0),
+        )
+
+    class FakeResponses:
+        def create(self, *, model, input, tools, max_output_tokens):
+            return FakeResponse()
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    monkeypatch.setattr(chat_service, "_create_azure_client", lambda **kwargs: FakeClient())
+    monkeypatch.setattr(chat_service, "_record_usage_summary", lambda **kwargs: None)
+
+    result = chat_service.generate_chat_reply(
+        messages=[{"role": "user", "content": "Pozdravljen"}],
+        model_id="mdml-gpt4o-mini-001",
+        use_web_search=False,
+    )
+
+    assert isinstance(result["responseId"], str)
+    assert result["responseId"].startswith("local-")
+    assert len(result["responseId"]) > len("local-")
+
+
 def test_generate_chat_reply_uses_last_completed_assistant_message(monkeypatch):
     monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_DEPLOYMENT", "MDML-GPT4o-Mini-001")
     monkeypatch.setenv("CHAT_MODEL_MDML_GPT4O_MINI_001_API_KEY", "mini-key")
