@@ -8,14 +8,12 @@ import {
 } from "@/lib/heritage-api";
 import SafeHtmlContent from "@/components/SafeHtmlContent";
 import { useLanguage } from "@/lib/i18n";
-import { Bot, RefreshCcw, Search, Send, User } from "lucide-react";
+import { Bot, RefreshCcw, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 const CHAT_INPUT_ID = "heritage-chat-input";
 const CHAT_MODEL_ID = "heritage-chat-model";
-const CHAT_WEB_SEARCH_ID = "heritage-chat-web-search";
 const CHAT_MODEL_STORAGE_KEY = "heritage-chat-model-id";
-const CHAT_WEB_SEARCH_STORAGE_KEY = "heritage-chat-web-search-enabled";
 const CHAT_INPUT_MIN_HEIGHT = 44;
 const CHAT_INPUT_MAX_HEIGHT = 160;
 
@@ -40,7 +38,6 @@ const ChatSidebar = () => {
 	const [loading, setLoading] = useState(false);
 	const [models, setModels] = useState<ChatModelDescriptor[]>([]);
 	const [selectedModelId, setSelectedModelId] = useState("");
-	const [useWebSearch, setUseWebSearch] = useState(false);
 	const [configError, setConfigError] = useState<string | null>(null);
 	const [requestError, setRequestError] = useState<string | null>(null);
 	const bottomRef = useRef<HTMLDivElement>(null);
@@ -76,12 +73,8 @@ const ChatSidebar = () => {
 	useEffect(() => {
 		if (typeof window === "undefined") return;
 		const storedModelId = window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "";
-		const storedWebSearch = window.localStorage.getItem(CHAT_WEB_SEARCH_STORAGE_KEY);
 		if (storedModelId) {
 			setSelectedModelId(storedModelId);
-		}
-		if (storedWebSearch === "1") {
-			setUseWebSearch(true);
 		}
 	}, []);
 
@@ -91,11 +84,6 @@ const ChatSidebar = () => {
 			window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, selectedModelId);
 		}
 	}, [selectedModelId]);
-
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		window.localStorage.setItem(CHAT_WEB_SEARCH_STORAGE_KEY, useWebSearch ? "1" : "0");
-	}, [useWebSearch]);
 
 	useEffect(() => {
 		const controller = new AbortController();
@@ -175,7 +163,6 @@ const ChatSidebar = () => {
 			const response = await sendChatMessage({
 				messages: requestMessages,
 				modelId: selectedModel.id,
-				useWebSearch,
 			});
 
 			setMessages((prev) => [
@@ -247,27 +234,6 @@ const ChatSidebar = () => {
 						</p>
 					)}
 				</div>
-
-				<label
-					htmlFor={CHAT_WEB_SEARCH_ID}
-					className="flex cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2"
-				>
-					<div className="min-w-0">
-						<div className="flex items-center gap-2 text-sm font-medium text-foreground">
-							<Search className="h-4 w-4 text-primary" aria-hidden="true" />
-							<span>{m.chat.webSearchLabel}</span>
-						</div>
-						<p className="mt-0.5 text-xs text-muted-foreground">{m.chat.webSearchHint}</p>
-					</div>
-					<input
-						id={CHAT_WEB_SEARCH_ID}
-						type="checkbox"
-						checked={useWebSearch}
-						onChange={(event) => setUseWebSearch(event.target.checked)}
-						disabled={!selectedModel?.available}
-						className="h-4 w-4 rounded border-border text-primary focus:ring-ring"
-					/>
-				</label>
 
 				{configError && <p className="text-xs text-destructive">{configError}</p>}
 			</div>

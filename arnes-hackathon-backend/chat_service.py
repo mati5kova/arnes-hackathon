@@ -121,7 +121,6 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
 
     SYS_PROMPT = GAMS_SYSTEM_PROMPT if _is_gams_model(requested_model) else SYSTEM_PROMPT
     conversation: list[dict[str, Any]] = [{"role": "system", "content": SYS_PROMPT}, *conversation_history]
-    print(conversation)
     if _is_gams_model(requested_model):
         result = _generate_gams_reply(
             conversation=conversation,
@@ -953,7 +952,6 @@ def _generate_gams_reply(
     text = response.choices[0].message.content or ""
     if not text:
         raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
-    print(text)
     
     #text = strip_non_json(text)     #zbirse ce slucajno poleg jsona vrne se kaj drugega
     parsed_resp = json.loads(repair_json(extract_json(text)), strict=False)
@@ -998,7 +996,6 @@ def _generate_gams_reply(
             ) from exc
         
         text = response.choices[0].message.content or ""
-        print(text)
         if not text:
             raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
         

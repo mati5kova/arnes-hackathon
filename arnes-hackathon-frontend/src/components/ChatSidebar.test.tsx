@@ -59,7 +59,6 @@ describe("ChatSidebar", () => {
 
 		await screen.findByRole("option", { name: "MDML-GPT5-001" });
 
-		fireEvent.click(screen.getByLabelText(/web search/i));
 		fireEvent.change(screen.getByRole("textbox", { name: /ask the ai assistant about heritage risks/i }), {
 			target: { value: "What is happening near Ptuj?" },
 		});
@@ -79,7 +78,7 @@ describe("ChatSidebar", () => {
 		expect(secondCall?.[0]).toContain("/api/chat");
 		expect(secondCall?.[1]?.method).toBe("POST");
 		expect(secondCall?.[1]?.body).toContain('"modelId":"mdml-gpt5-001"');
-		expect(secondCall?.[1]?.body).toContain('"useWebSearch":true');
+		expect(secondCall?.[1]?.body).not.toContain("useWebSearch");
 		expect(secondCall?.[1]?.body).toContain("What is happening near Ptuj?");
 	});
 

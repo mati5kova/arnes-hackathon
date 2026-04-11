@@ -535,12 +535,14 @@ async def chat_usage(response: Response) -> Dict[str, Any]:
     },
 )
 async def chat(payload: ChatRequest, response: Response) -> Dict[str, Any]:
+    # web_serach tool je na voljo pri vseh GPT5+ modelih ne pa pri GaMS-u
+    use_web_search = payload.modelId != "gams-3-12b"
     try:
         result = await run_in_threadpool(
             generate_chat_reply,
             messages=[message.model_dump() for message in payload.messages],
             model_id=payload.modelId,
-            use_web_search=payload.useWebSearch,
+            use_web_search=use_web_search,
         )
     except ChatServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
