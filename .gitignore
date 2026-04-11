@@ -34,3 +34,7 @@ arnes-hackathon-backend/AI/Data_Processing/DRSV_HIDRO5_LIN_PV/
 
 #jupyter notebook
 **/.ipynb_checkpoints
+
+#gams
+/models
+/models/*

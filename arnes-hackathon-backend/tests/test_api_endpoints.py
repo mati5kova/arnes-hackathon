@@ -168,7 +168,6 @@ def test_chat_endpoint_returns_assistant_reply_and_citations(client: TestClient,
         json={
             "messages": [{"role": "user", "content": "Any recent flooding near Ptuj?"}],
             "modelId": "mdml-gpt5-001",
-            "useWebSearch": True,
         },
     )
     assert response.status_code == 200
