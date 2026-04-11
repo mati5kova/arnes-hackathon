@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -32,6 +33,43 @@ def test_compute_air_pollution_score_uses_worst_available_signal():
     assert score is not None
     # O3 value should dominate and push station into high/extreme range.
     assert score > 3.0
+
+
+def test_load_fire_geojson_areas_inverts_source_danger_scale(tmp_path: Path):
+    fire_geojson_path = tmp_path / "fire.geojson"
+    fire_geojson_path.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"pozar": "1"},
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[14.0, 46.0], [14.1, 46.0], [14.1, 46.1], [14.0, 46.1], [14.0, 46.0]]],
+                        },
+                    },
+                    {
+                        "type": "Feature",
+                        "properties": {"pozar": "4"},
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[14.2, 46.2], [14.3, 46.2], [14.3, 46.3], [14.2, 46.3], [14.2, 46.2]]],
+                        },
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    areas = spatial_sources.load_fire_geojson_areas(fire_geojson_path, score_min=1.0, score_max=4.0)
+
+    assert len(areas) == 2
+    area_by_score = {float(area["score"]): area for area in areas}
+    assert area_by_score[1.0]["normalized"] > area_by_score[4.0]["normalized"]
+    assert area_by_score[1.0]["level"] > area_by_score[4.0]["level"]
 
 
 def test_build_grid_cells_generates_valid_bounds_and_levels():
@@ -118,6 +156,7 @@ def test_list_overlay_grid_area_mode_uses_hazard_areas_not_points(monkeypatch):
 
     monkeypatch.setattr(service, "get_overlay_dataset", lambda refresh=False: dataset)
     monkeypatch.setattr(service, "get_target_max_area_items", lambda zoom: 1000)
+    monkeypatch.setattr(service, "should_use_area_grid", lambda *, kind, zoom: False)
 
     payload = service.list_overlay_grid(kind="fire", bbox=[13.9, 45.9, 14.2, 46.2], zoom=8)
 
@@ -158,6 +197,7 @@ def test_list_overlay_grid_reuses_view_cache_for_identical_request(monkeypatch):
     service.overlay_view_cache.clear()
     monkeypatch.setattr(service, "get_overlay_dataset", lambda refresh=False: dataset)
     monkeypatch.setattr(service, "select_visible_areas", fake_select_visible_areas)
+    monkeypatch.setattr(service, "should_use_area_grid", lambda *, kind, zoom: False)
 
     payload_a = service.list_overlay_grid(kind="fire", bbox=[13.9, 45.9, 14.2, 46.2], zoom=8)
     payload_b = service.list_overlay_grid(kind="fire", bbox=[13.9, 45.9, 14.2, 46.2], zoom=8)
