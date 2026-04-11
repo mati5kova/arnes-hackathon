@@ -38,6 +38,9 @@ def load_fire_geojson_areas(path: Path, *, score_min: float, score_max: float) -
             continue
 
         normalized = normalize_score(raw_score, score_min=score_min, score_max=score_max)
+
+        normalized = 1.0 - normalized # obrnemo ker v originalnih podatkih je 1=high in 4=low danger
+        
         level = normalized_to_level(normalized)
         rings = extract_geojson_outer_rings(geometry)
 
