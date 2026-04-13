@@ -160,6 +160,28 @@ def test_normalize_record_extracts_explicit_elevation():
     assert normalized["elevationM"] == 412.58
 
 
+def test_normalize_record_extracts_corrected_hazard_fields():
+    record = {
+        "id": "EID-3",
+        "name": "Hazard Site",
+        "lat": 46.1234,
+        "lng": 14.5678,
+        "pozar_ocena_popravljena": 0.2,
+        "poplave_ocena_popravljena": 0.8,
+        "plazovi_ocena_popravljena": 0.0,
+        "potres_ocena_popravljena": 4.0,
+        "skupaj_nevarnost": 5.0,
+    }
+
+    normalized = normalize_record(record, 0)
+    assert normalized is not None
+    assert normalized["fireHazard"] == 0.2
+    assert normalized["floodHazard"] == 0.8
+    assert normalized["landslideHazard"] == 0.0
+    assert normalized["earthquakeHazard"] == 4.0
+    assert normalized["combinedHazard"] == 5.0
+
+
 def test_score_search_match_suppresses_short_detail_only_queries():
     site = {
         "searchNameNormalized": "",

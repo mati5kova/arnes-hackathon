@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { buildExplainSitePrompt, EXPLAIN_SITE_EVENT } from "@/components/chat-events";
 import { useLanguage } from "@/lib/i18n";
 import type { HeritageSiteDetail, HeritageSiteSummary } from "@/types/heritage";
 
@@ -14,6 +15,14 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 	if (!site) return null;
 
 	const detailFields = "detailFields" in site ? site.detailFields : [];
+	const handleExplainSite = () => {
+		if (typeof window === "undefined" || site.isCluster) return;
+		window.dispatchEvent(
+			new CustomEvent(EXPLAIN_SITE_EVENT, {
+				detail: { prompt: buildExplainSitePrompt(site) },
+			}),
+		);
+	};
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -26,6 +35,7 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 				</DialogHeader>
 
 				<div className="space-y-4 text-sm">
+					
 					<dl className="grid grid-cols-1 gap-2 text-muted-foreground md:grid-cols-2">
 						{site.registryId && (
 							<div>
@@ -88,6 +98,17 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 									</div>
 								))}
 							</dl>
+						</div>
+					)}
+                    {!site.isCluster && (
+						<div className="flex justify-end">
+							<button
+								type="button"
+								onClick={handleExplainSite}
+								className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+							>
+								{m.siteDialog.explainAction}
+							</button>
 						</div>
 					)}
 				</div>

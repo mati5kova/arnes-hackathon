@@ -7,6 +7,7 @@ import {
 	sendChatMessage,
 } from "@/lib/heritage-api";
 import SafeHtmlContent from "@/components/SafeHtmlContent";
+import { EXPLAIN_SITE_EVENT, type ExplainSiteEventDetail } from "@/components/chat-events";
 import { useLanguage } from "@/lib/i18n";
 import { Bot, RefreshCcw, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -16,6 +17,7 @@ const CHAT_MODEL_ID = "heritage-chat-model";
 const CHAT_MODEL_STORAGE_KEY = "heritage-chat-model-id";
 const CHAT_INPUT_MIN_HEIGHT = 44;
 const CHAT_INPUT_MAX_HEIGHT = 160;
+const ALLOWED_CHAT_MODEL_IDS = new Set(["mdml-gpt5-2-001", "gams-3-12b"]);
 
 interface UiMessage extends ChatMessage {
 	id: string;
@@ -51,6 +53,53 @@ const ChatSidebar = () => {
 		);
 		element.style.height = `${nextHeight}px`;
 		element.style.overflowY = element.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? "auto" : "hidden";
+	};
+
+	const sendMessage = async (text: string) => {
+		const normalizedText = text.trim();
+		if (!normalizedText || loading || !selectedModel || !selectedModel.available) return;
+
+		const userMessage: UiMessage = {
+			id: `user-${Date.now()}`,
+			role: "user",
+			content: normalizedText,
+		};
+
+		const requestMessages = [...messages, userMessage]
+			.filter((message) => !message.isWelcome)
+			.map((message) => ({ role: message.role, content: message.content }));
+
+		setInput("");
+		setRequestError(null);
+		setMessages((prev) => [...prev, userMessage]);
+		setLoading(true);
+
+		try {
+			const response = await sendChatMessage({
+				messages: requestMessages,
+				modelId: selectedModel.id,
+			});
+			console.log("Chat response payload:", response);
+
+			setMessages((prev) => [
+				...prev,
+				{
+					id: response.responseId,
+					role: "assistant",
+					content: response.message.content,
+					citations: response.citations,
+					webSearchUsed: response.webSearchUsed,
+				},
+			]);
+		} catch (error) {
+			const detail =
+				error instanceof ApiError && error.detail
+					? error.detail
+					: m.chat.requestFailed;
+			setRequestError(detail);
+		} finally {
+			setLoading(false);
+		}
 	};
 
 	useEffect(() => {
@@ -92,22 +141,23 @@ const ChatSidebar = () => {
 			try {
 				setConfigError(null);
 				const response = await fetchChatModels(controller.signal);
-				setModels(response.items);
+				const filteredModels = response.items.filter((item) => ALLOWED_CHAT_MODEL_IDS.has(item.id));
+				setModels(filteredModels);
 
 				const storedModelId =
 					typeof window === "undefined"
 						? ""
 						: window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "";
-				const availableIds = response.items.filter((item) => item.available).map((item) => item.id);
+				const availableIds = filteredModels.filter((item) => item.available).map((item) => item.id);
 				const preferredId =
 					(storedModelId && availableIds.includes(storedModelId) && storedModelId) ||
 					availableIds.find((item) => item === response.defaultModelId) ||
 					availableIds[0] ||
-					response.items[0]?.id ||
+					filteredModels[0]?.id ||
 					"";
 
 				setSelectedModelId(preferredId);
-				if (response.items.length === 0) {
+				if (filteredModels.length === 0) {
 					setConfigError(m.chat.noModelsConfigured);
 				} else if (availableIds.length === 0) {
 					setConfigError(m.chat.noModelsAvailable);
@@ -127,6 +177,20 @@ const ChatSidebar = () => {
 	const selectedModel = models.find((model) => model.id === selectedModelId) || null;
 	const canSend = !!input.trim() && !loading && !!selectedModel && selectedModel.available;
 
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const handleExplainSite = (event: Event) => {
+			const customEvent = event as CustomEvent<ExplainSiteEventDetail>;
+			const prompt = customEvent.detail?.prompt?.trim();
+			if (!prompt || loading) return;
+			void sendMessage(prompt);
+		};
+
+		window.addEventListener(EXPLAIN_SITE_EVENT, handleExplainSite as EventListener);
+		return () => window.removeEventListener(EXPLAIN_SITE_EVENT, handleExplainSite as EventListener);
+	}, [loading, messages, selectedModel, m.chat.requestFailed]);
+
 	const handleResetConversation = () => {
 		if (loading) return;
 		setMessages([
@@ -141,49 +205,7 @@ const ChatSidebar = () => {
 	};
 
 	const handleSend = async () => {
-		const text = input.trim();
-		if (!text || loading || !selectedModel || !selectedModel.available) return;
-
-		const userMessage: UiMessage = {
-			id: `user-${Date.now()}`,
-			role: "user",
-			content: text,
-		};
-
-		const requestMessages = [...messages, userMessage]
-			.filter((message) => !message.isWelcome)
-			.map((message) => ({ role: message.role, content: message.content }));
-
-		setInput("");
-		setRequestError(null);
-		setMessages((prev) => [...prev, userMessage]);
-		setLoading(true);
-
-		try {
-			const response = await sendChatMessage({
-				messages: requestMessages,
-				modelId: selectedModel.id,
-			});
-
-			setMessages((prev) => [
-				...prev,
-				{
-					id: response.responseId,
-					role: "assistant",
-					content: response.message.content,
-					citations: response.citations,
-					webSearchUsed: response.webSearchUsed,
-				},
-			]);
-		} catch (error) {
-			const detail =
-				error instanceof ApiError && error.detail
-					? error.detail
-					: m.chat.requestFailed;
-			setRequestError(detail);
-		} finally {
-			setLoading(false);
-		}
+		await sendMessage(input);
 	};
 
 	return (

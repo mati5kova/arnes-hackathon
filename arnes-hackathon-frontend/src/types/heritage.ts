@@ -9,6 +9,11 @@ export interface HeritageSiteSummary {
 	municipality?: string;
 	description?: string;
 	elevationM?: number;
+	fireHazard?: number;
+	floodHazard?: number;
+	landslideHazard?: number;
+	earthquakeHazard?: number;
+	combinedHazard?: number;
 	isCluster?: boolean;
 	clusterCount?: number;
 }

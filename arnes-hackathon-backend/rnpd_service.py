@@ -27,9 +27,10 @@ RNPD_PREPROCESSED_CACHE_ENABLED = os.getenv("RNPD_PREPROCESSED_CACHE_ENABLED", "
     "y",
 }
 RNPD_PREPROCESSED_CACHE_FILE = os.getenv("RNPD_PREPROCESSED_CACHE_FILE", str(BASE_DIR / "rnpd.preprocessed.json"))
-PREPROCESSED_SCHEMA_VERSION = 1
+PREPROCESSED_SCHEMA_VERSION = 2
 LOCAL_FALLBACK_CANDIDATES = [
     os.getenv("RNPD_LOCAL_FILE"),
+    str(BASE_DIR / "AI" / "Data" / "kd_z_nevarnost_enriched_verified.geojson"),
     str(BASE_DIR / "rnpd.json"),
     str(BASE_DIR.parent / "arnes-hackathon-frontend" / "src" / "data" / "rnpd.json"),
 ]
@@ -104,6 +105,14 @@ def get_heritage_site_details(site_id: str, *, refresh: bool = False) -> dict[st
     payload["detailFields"] = site["detailFields"]
     payload["sourceUrl"] = site["sourceUrl"]
     return payload
+
+
+def read_corrected_hazard(record: dict[str, Any], *keys: str) -> float | None:
+    value = pick_first(record, list(keys))
+    if value is None:
+        return None
+    parsed = to_number(value)
+    return round(float(parsed), 3) if parsed is not None else None
 
 
 def get_dataset(*, refresh: bool = False) -> dict[str, Any]:
@@ -425,6 +434,11 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
             )
         )
     )
+    fire_hazard = read_corrected_hazard(source_with_geometry, "pozar_ocena_popravljena", "fire_danger_revised")
+    flood_hazard = read_corrected_hazard(source_with_geometry, "poplave_ocena_popravljena", "flood_danger_revised")
+    landslide_hazard = read_corrected_hazard(source_with_geometry, "plazovi_ocena_popravljena", "landslide_danger_revised")
+    earthquake_hazard = read_corrected_hazard(source_with_geometry, "potres_ocena_popravljena", "earthquake_danger_revised")
+    combined_hazard = read_corrected_hazard(source_with_geometry, "skupaj_nevarnost", "combined_danger_score")
     site_id = string_value(registry_id) or f"{name}-{coordinates['lat']:.6f}-{coordinates['lng']:.6f}".lower()
 
     used_key_candidates = [
@@ -537,6 +551,11 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
         "municipality": municipality or None,
         "description": description or None,
         "elevationM": round(float(elevation_m), 2) if elevation_m is not None else None,
+        "fireHazard": fire_hazard,
+        "floodHazard": flood_hazard,
+        "landslideHazard": landslide_hazard,
+        "earthquakeHazard": earthquake_hazard,
+        "combinedHazard": combined_hazard,
         "detailFields": detail_fields,
         "searchNameNormalized": name_normalized,
         "searchMunicipalityNormalized": municipality_normalized,
@@ -559,6 +578,11 @@ def to_summary(site: dict[str, Any]) -> dict[str, Any]:
         "municipality": site.get("municipality"),
         "description": site.get("description"),
         "elevationM": site.get("elevationM"),
+        "fireHazard": site.get("fireHazard"),
+        "floodHazard": site.get("floodHazard"),
+        "landslideHazard": site.get("landslideHazard"),
+        "earthquakeHazard": site.get("earthquakeHazard"),
+        "combinedHazard": site.get("combinedHazard"),
         "isCluster": site.get("isCluster"),
         "clusterCount": site.get("clusterCount"),
     }

@@ -125,6 +125,31 @@ class HeritageSiteSummary(BaseModel):
         description="Site elevation in meters when available from enriched spatial data.",
         examples=[337.41],
     )
+    fireHazard: Optional[float] = Field(
+        default=None,
+        description="Corrected fire hazard score for this site when available.",
+        examples=[0.2],
+    )
+    floodHazard: Optional[float] = Field(
+        default=None,
+        description="Corrected flood hazard score for this site when available.",
+        examples=[0.8],
+    )
+    landslideHazard: Optional[float] = Field(
+        default=None,
+        description="Corrected landslide hazard score for this site when available.",
+        examples=[0.0],
+    )
+    earthquakeHazard: Optional[float] = Field(
+        default=None,
+        description="Corrected earthquake hazard score for this site when available.",
+        examples=[4.0],
+    )
+    combinedHazard: Optional[float] = Field(
+        default=None,
+        description="Combined corrected hazard score across supported hazard types when available.",
+        examples=[5.0],
+    )
     isCluster: Optional[bool] = Field(
         default=None,
         description="True when this item is a synthetic cluster marker (not a single site).",
