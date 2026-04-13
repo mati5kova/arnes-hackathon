@@ -111,7 +111,6 @@ export async function sendChatMessage(
 	payload: {
 		messages: ChatMessage[];
 		modelId: string;
-		useWebSearch: boolean;
 	},
 	signal?: AbortSignal,
 ): Promise<ChatResponse> {

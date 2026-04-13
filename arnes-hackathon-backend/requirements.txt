@@ -9,3 +9,7 @@ rasterio==1.4.3
 shapely==2.0.7
 uvicorn[standard]==0.35.0
 chromadb==1.5.5
+torch>=2.4.0
+transformers>=4.51.0
+accelerate>=0.34.0
+json-repair>=0.58.7

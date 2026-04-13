@@ -74,7 +74,7 @@ OVERLAY_AREA_GRID_MIN_ZOOM = max(3, int(os.getenv("OVERLAY_AREA_GRID_MIN_ZOOM", 
 OVERLAY_AREA_GRID_MAX_ZOOM = min(18, max(OVERLAY_AREA_GRID_MIN_ZOOM, int(os.getenv("OVERLAY_AREA_GRID_MAX_ZOOM", "11"))))
 OVERLAY_AREA_GRID_KINDS = frozenset(
     kind.strip()
-    for kind in os.getenv("OVERLAY_AREA_GRID_KINDS", "flood,landslide").split(",")
+    for kind in os.getenv("OVERLAY_AREA_GRID_KINDS", "fire,flood,landslide").split(",")
     if kind.strip()
 )
 OVERLAY_VIEW_CACHE_SIZE = max(32, int(os.getenv("OVERLAY_VIEW_CACHE_SIZE", "320")))

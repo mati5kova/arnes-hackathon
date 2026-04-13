@@ -7,11 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from uuid import uuid4
 import chromadb
-from openai import AzureOpenAI
+from openai import AzureOpenAI, OpenAI
+import re
+from json_repair import repair_json
 
 from dotenv import load_dotenv
-from system_prompt import SYSTEM_PROMPT
+from system_prompt import SYSTEM_PROMPT, GAMS_SYSTEM_PROMPT
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -43,6 +46,7 @@ MODEL_SPECS = (
     ModelSpec("mdml-gpt5-1-001", "MDML-GPT5.1-001", "CHAT_MODEL_MDML_GPT5_1_001"),
     ModelSpec("mdml-gpt5-2-001", "MDML-GPT5.2-001", "CHAT_MODEL_MDML_GPT5_2_001"),
     ModelSpec("mdml-gpt5-nano-001", "MDML-GPT5-Nano-001", "CHAT_MODEL_MDML_GPT5_NANO_001"),
+    ModelSpec("gams-3-12b", "GaMS-3-12B-Instruct", "CHAT_MODEL_GAMS_3_12B"), #GaMS
 )
 
 EMBED_MODEL=os.getenv("MDML-TextEmbedding-003_DEPLOYMENT")
@@ -92,6 +96,12 @@ def get_default_chat_model_id() -> str:
 def get_chat_usage_summary() -> dict[str, Any]:         # za /logs
     return _read_usage_summary()
 
+def extract_json(text: str) -> str:
+    # Remove markdown code fences
+    text = re.sub(r"^```(?:json)?\s*", "", text.strip())
+    text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
 
 def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None = None, use_web_search: bool) -> dict[str, Any]:
     requested_model = (model_id or get_default_chat_model_id()).strip()
@@ -110,6 +120,26 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
     if not conversation_history:
         raise ChatServiceError("At least one chat message is required.", status_code=400)
 
+    SYS_PROMPT = GAMS_SYSTEM_PROMPT if _is_gams_model(requested_model) else SYSTEM_PROMPT
+    conversation: list[dict[str, Any]] = [{"role": "system", "content": SYS_PROMPT}, *conversation_history]
+    if _is_gams_model(requested_model):
+        result = _generate_gams_reply(
+            conversation=conversation,
+            model_id=requested_model,
+            config=config,
+        )
+        # samo tko za info, dejansko nepotrebno
+        _record_usage_summary(
+            model_id=config["id"],
+            model_label=config["label"],
+            deployment=config["deployment"],
+            usage=result["usage"],
+            web_search_used=False,
+        )
+        return result
+    # nadaljuj normalno preko azurja ce ni GaMS
+
+
     client = _create_azure_client(
         api_key=config["apiKey"],
         azure_endpoint=config["azureEndpoint"],
@@ -120,7 +150,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
     web_search_used = False
     incomplete_response_retries = 0
 
-    conversation: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}, *conversation_history]
+    
     response: Any = None
     for _ in range(CHAT_MAX_TOOL_ROUNDS + 1):
         response = client.responses.create(
@@ -133,9 +163,9 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
 
         response_items = _response_output_items(response)
         tool_calls = [item for item in response_items if getattr(item, "type", "") == "function_call"]
-        web_search_used = web_search_used or any(
-            getattr(item, "type", "") == "web_search_call" for item in response_items
-        )
+        # web_search_used = web_search_used or any(
+        #     getattr(item, "type", "") == "web_search_call" for item in response_items
+        # )
 
         if not tool_calls:
             text, citations, response_status = _extract_text_and_citations_from_response(response)
@@ -164,7 +194,7 @@ def generate_chat_reply(*, messages: list[dict[str, str]], model_id: str | None 
                 "content": text,
                 "citations": citations,
                 "webSearchUsed": web_search_used,
-                "responseId": getattr(response, "id", None),
+                "responseId": _resolve_response_id(response),
                 "usage": aggregated_usage,
             }
 
@@ -204,20 +234,32 @@ def run(
     )
 
 
+def _resolve_response_id(response: Any) -> str:
+    raw_response_id = getattr(response, "id", None)
+    if isinstance(raw_response_id, str):
+        response_id = raw_response_id.strip()
+        if response_id:
+            return response_id
+    timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    return f"local-{timestamp_ms}-{uuid4().hex[:8]}"
+
+
 def dispatch_tool(name: str, args: dict[str, Any]) -> Any:
     if name == "top_k_endangered_in_region":
         return top_k_endangered_in_region(**args)
     if name == "top_k_endangered_in_municipality":
         return top_k_endangered_in_municipality(**args)
-    if name == "get_info_by_eid":
-        return get_info_by_eid(**args)
+    if name == "get_info_by_eids":
+        return get_info_by_eids(**args)
     if name == "search_heritage_records":
         return search_heritage_records(**args)
+    if name == "top_k_endangered_in_country":
+        return top_k_endangered_in_country(**args)
     raise ValueError(f"Unknown tool: {  name}")
 
 
 def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -235,7 +277,7 @@ def top_k_endangered_in_region(regija: str, endangerment: str, k: int = -1) -> l
     return ranked["EID"].astype(str).tolist()
 
 def top_k_endangered_in_municipality(obcina: str, endangerment: str, k: int = -1) -> list[str]:
-    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'}:
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
         raise ValueError("Unsupported endangerment.")
 
     gdf = _load_gdf()
@@ -252,20 +294,67 @@ def top_k_endangered_in_municipality(obcina: str, endangerment: str, k: int = -1
 
     return ranked["EID"].astype(str).tolist()
 
-def get_info_by_eid(eid: str, columns: list[str] | None = None) -> dict[str, Any]:
-    gdf = _load_gdf()
-    subset = gdf[gdf["EID"].astype(str) == str(eid)]
-    if subset.empty:
-        raise ValueError(f"No site was found for EID '{eid}'.")
+def top_k_endangered_in_country(endangerment: str, k: int = -1):
+    if endangerment not in {'pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'}:
+        raise ValueError("Unsupported endangerment.")
 
-    row = subset.iloc[0]
-    if columns:
-        missing = [column for column in columns if column not in gdf.columns]
+    gdf = _load_gdf()
+    
+    scores = gdf[endangerment].fillna(0)
+    if k == -1:
+        max_score = scores.max()
+        ranked = gdf[scores == max_score]
+    else:
+        ranked = gdf.nlargest(max(1, int(k)), endangerment)
+
+    return ranked["EID"].astype(str).tolist()
+
+# fixa crash ko je GaMS podal samo en string v `get_info_by_eids` namesto seznama in je pandas.Series.isin() naredu TypeError.
+# normalizira vrednost v seznam of non-empty stringov zato da se vedno obravnava enako pri toolih
+def _normalize_str_list(value: Any, *, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple, set)):
+        normalized: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            normalized_item = str(item).strip()
+            if normalized_item:
+                normalized.append(normalized_item)
+        return normalized
+    raise ValueError(f"{field_name} must be a string or a list of strings.")
+
+
+def get_info_by_eids(eids: list[str], columns: list[str] | None = None) -> list[dict]:
+    normalized_eids = _normalize_str_list(eids, field_name="eids")
+    normalized_columns = _normalize_str_list(columns, field_name="columns") if columns is not None else None # normaliziramo da ni gams napake
+
+    if not normalized_eids:
+        raise ValueError("At least one EID must be provided.")
+
+    gdf = _load_gdf()
+    records = gdf.drop(columns="geometry", errors="ignore")
+    subset = records[records["EID"].astype(str).isin(normalized_eids)]
+
+    # GaMS je vcasih vracal ESD key (glej rnpd.json) namesto EID oblike "1-xyzwu". 
+    # fallback da gremo pogledat tudi ESD
+    if subset.empty and "ESD" in records.columns:
+        subset = records[records["ESD"].astype(str).isin(normalized_eids)]
+
+    if subset.empty:
+        raise ValueError(f"No site was found for EIDs {normalized_eids}.")
+
+    if normalized_columns:
+        missing = [column for column in normalized_columns if column not in subset.columns]
         if missing:
             raise ValueError(f"Unknown columns: {', '.join(missing)}")
-        row = row[columns]
+        subset = subset[normalized_columns]
 
-    return _json_safe(row.to_dict())
+    return subset.to_dict(orient="records")
 
 def search_heritage_records(query: str, k: int = 5):
     if embed_client is None or not EMBED_MODEL:
@@ -324,8 +413,28 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         },
         {
             "type": "function",
+            "name": "top_k_endangered_in_country",
+            "description": "Returns a list of the top endangered objects in the whole country for one endangerment type. You can also use the endangerment for a combined danger. Use this when the user asks about dangers for the whole country",
+            "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "endangerment": {
+                            "type": "string",
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
+                        },
+                        "k": {
+                            "type": "integer",
+                            "description": "How many results to return. If omitted, returns all with max score.",
+                        },
+                    },
+                    "required": ["endangerment"],
+                    "additionalProperties": False,
+                },
+        },
+        {
+            "type": "function",
             "name": "top_k_endangered_in_region",
-            "description": "Returns a list of the top endangered objects in a region for one endangerment type. You can also use this to get all heritage sites in a region by entering a large k",
+            "description": "Returns a list of the top endangered objects in a region for one endangerment type. You can also use the endangerment for a combined danger. You can also use this to get all heritage sites in a region by entering a large k",
             "parameters": {
                     "type": "object",
                     "properties": {
@@ -337,7 +446,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
                         },
                         "k": {
                             "type": "integer",
@@ -351,7 +460,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         {
             "type": "function",
             "name": "top_k_endangered_in_municipality",
-            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type. You can also use this to get all heritage sites in a municipality by entering k=-1 and any endangerment type",
+            "description": "Returns a list of the top endangered objects in a municipality for one endangerment type. You can also use the endangerment for a combined danger. You can also use this to get all heritage sites in a municipality by entering k=-1 and any endangerment type",
             "parameters": {
                     "type": "object",
                     "properties": {
@@ -361,7 +470,7 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
                         },
                         "endangerment": {
                             "type": "string",
-                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena'],
+                            "enum": ['pozar_ocena_popravljena', 'poplave_ocena_popravljena','potres_ocena_popravljena', 'plazovi_ocena_popravljena', 'skupaj_nevarnost'],
                         },
                         "k": {
                             "type": "integer",
@@ -374,23 +483,26 @@ def _build_tools(*, use_web_search: bool) -> list[dict[str, Any]]:
         },
         {
             "type": "function",
-            "name": "get_info_by_eid",
-            "description": "Returns information about a specific cultural heritage object by EID.",
+            "name": "get_info_by_eids",
+            "description": "Returns information about multiple or one specific cultural heritage objects by their EID. Use this when you recieve EIDs from another tool.",
             "parameters": {
                     "type": "object",
                     "properties": {
-                        "eid": {"type": "string"},
+                        "eids": {
+                            "type": "array",
+                            "items": {"type" : "string"}
+                            },
                         "columns": {
                             "type": "array",
                             "items": {
                                 "type": "string",
                                 "enum": ["ESD", "EID", "IME", "SINONIMI", "OPIS", "ZVRST", "TIP", "GESLA", "DATACIJA", "LOKACIJAOPIS", "OBCINA", "ZAVOD", "SPOMENIK", "poplave", "pozar", "plazovi", "regija", "UE_UIME", "potres", "prevladujoci_material",
-                                          'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', "danger_revision_reasoning"]
+                                          'pozar_ocena_popravljena', 'poplave_ocena_popravljena', 'potres_ocena_popravljena', 'plazovi_ocena_popravljena', "danger_revision_reasoning", "skupaj_nevarnost"]
                                 },
                             "description": "Columns to show"
                         },
                     },
-                    "required": ["eid"],
+                    "required": ["eids"],
                     "additionalProperties": False,
                 },
         },
@@ -483,6 +595,89 @@ def _parse_tool_arguments(raw: str) -> dict[str, Any]:
     return parsed
 
 
+# tool functions, while still accepting already-object-shaped arguments.
+# fixa neujemanje med vračanjem od GaMSa ki je vrača positional arguments (npr. ["Gorenjska", "skupaj_nevarnost", 5])
+# GaMS je dosti bolj konsistenten ce ne rabi vracat valid JSONa vedno
+# dispatch_tool pricakuje kwargs
+# sprejme positional args in valid JSON
+def _coerce_gams_tool_arguments(tool_name: str, raw_arguments: Any) -> dict[str, Any]:
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+
+    if tool_name == "search_heritage_records":
+        params = ["query", "k"]
+    elif tool_name == "top_k_endangered_in_region":
+        params = ["regija", "endangerment", "k"]
+    elif tool_name == "top_k_endangered_in_municipality":
+        params = ["obcina", "endangerment", "k"]
+    elif tool_name == "top_k_endangered_in_country":
+        params = ["endangerment", "k"]
+    elif tool_name == "get_info_by_eids":
+        params = ["eids", "columns"]
+    else:
+        raise ValueError(f"Unknown tool: {tool_name}")
+
+    if isinstance(raw_arguments, list):
+        return {key: value for key, value in zip(params, raw_arguments)}
+
+    raise ValueError(f"Unsupported arguments format for tool {tool_name}.")
+
+
+# fixa raw JSONDecodeError/Empty-response napake ko je GaMS vracal prazen ali pa invalid JSON en korak po tool-callu
+# repaira model text in validira JOSN
+# raisa ChatServiceError namesto obicen 500 status
+def _parse_gams_json_response(text: str) -> dict[str, Any]:
+    cleaned_text = extract_json(text)
+    if not cleaned_text.strip():
+        raise ChatServiceError(
+            "GaMS je vrnil neveljaven prazen JSON odgovor.",
+            status_code=502,
+        )
+
+    repaired_text = repair_json(cleaned_text)
+
+    if not repaired_text.strip():
+        raise ChatServiceError(
+            "GaMS je vrnil neveljaven prazen JSON odgovor.",
+            status_code=502,
+        )
+
+    try:
+        parsed = json.loads(repaired_text, strict=False)
+    except json.JSONDecodeError as exc:
+        preview = cleaned_text.strip().replace("\n", " ")[:200]
+        raise ChatServiceError(
+            f"GaMS je vrnil neveljaven JSON odgovor. Začetek odgovora: {preview or '<prazen odgovor>'}",
+            status_code=502,
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise ChatServiceError(
+            "GaMS je vrnil JSON odgovor v nepričakovani obliki.",
+            status_code=502,
+        )
+
+    return parsed
+
+
+# popravi drugo krog gamsovega tool calla
+# prej je bil invalid JSON format + typo (msg = f'"funcito_call": "{parsed_resp["tool"]}" "output": "{output}"')
+# gams je izgubil tool v tool chainu ker je pricakov drugacen format in je vrnu invalid JSON (glej sliko v screenshot folderju)
+def _build_gams_tool_result_message(tool_name: str, result: Any) -> str:
+    payload: dict[str, Any] = {
+        "function_call": tool_name,
+        "function_return": _json_safe(result),
+    }
+
+    if tool_name.startswith("top_k_endangered_"):
+        payload["hint"] = (
+            "Dobil si EID-je. Takoj pokliči get_info_by_eids z dobljenimi EID-ji, "
+            "preden sestaviš končni odgovor."
+        )
+
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _response_output_items(response: Any) -> list[Any]:
     output = getattr(response, "output", None)
     if output is None:
@@ -572,7 +767,7 @@ def _serialize_model(spec: ModelSpec, *, default_model_id: str) -> dict[str, Any
         "deployment": config["deployment"],
         "available": config["available"],
         "missingEnv": config["missingEnv"],
-        "supportsWebSearch": True,
+        "supportsWebSearch": not _is_gams_model(spec.id),
         "isDefault": config["id"] == default_model_id,
     }
 
@@ -586,6 +781,19 @@ def _find_model_spec_by_env_prefix(env_prefix: str) -> ModelSpec | None:
 
 
 def _resolve_model_config(spec: ModelSpec) -> dict[str, Any]:
+    # GaMS — lokalni vLLM, ne potrebuje Azure konfiga
+    if spec.id.startswith("gams-"):
+        base_url = os.getenv("GAMS_BASE_URL", "http://localhost:65535/v1")
+        return {
+            "id": spec.id,
+            "label": spec.label,
+            "deployment": os.getenv("GAMS_MODEL_NAME", "GaMS3-12B-Instruct"),
+            "apiKey": "EMPTY",
+            "azureEndpoint": base_url,
+            "available": True,   # privzeto dostopen, napaka se pojavi pri klicu
+            "missingEnv": [],
+        }
+
     deployment = _read_env(f"{spec.env_prefix}_DEPLOYMENT")
     api_key = (
         _read_env(f"{spec.env_prefix}_API_KEY")
@@ -804,12 +1012,12 @@ def _json_safe(value: Any) -> Any:
     except ModuleNotFoundError:
         pd = None
 
-    if pd is not None and pd.isna(value):
-        return None
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
+    if pd is not None and pd.isna(value):
+        return None
     if hasattr(value, "item") and callable(value.item):
         try:
             return _json_safe(value.item())
@@ -817,6 +1025,245 @@ def _json_safe(value: Any) -> Any:
             return str(value)
     return value
 
+#
+# GAMS
+#
+def _is_gams_model(model_id: str) -> bool:
+    return model_id.startswith("gams-")
+
+def _create_gams_client() -> OpenAI:
+    base_url = os.getenv("GAMS_BASE_URL", "http://localhost:65535/v1")
+    return OpenAI(
+        base_url=base_url,
+        api_key="EMPTY",  # vLLM ne potrebuje pravega ključa
+    )
+
+def _generate_gams_reply(
+    *,
+    conversation: list[dict],
+    model_id: str,
+    config: dict,
+) -> dict:
+    """Koda pot za GaMS prek vLLM — brez tool callinga."""
+    client = _create_gams_client()
+    vllm_model_name = os.getenv("GAMS_MODEL_NAME", "GaMS3-12B-Instruct")
+
+    messages: list[dict[str, Any]] = []
+
+    messages.append({"role": "user", "content": GAMS_SYSTEM_PROMPT})
+    messages.append({"role": "assistant", "content": "Sedaj bom popolnoma sledil tvojim navodilom in odgovarjal v dogovorjenem JSON formatu"})
+
+    for msg in conversation:
+        role = msg.get("role") or ""
+        content = msg.get("content") or ""
+        if not content or role not in ("user", "assistant"):
+            continue
+
+        if role == "assistant":
+            # Normalize: if the stored response is HTML/plain text (not JSON),
+            # wrap it back into the JSON format GaMS expects to see in history.
+            try:
+                json.loads(content)
+                gams_content = content  # already valid JSON from a previous tool-chain turn
+            except (json.JSONDecodeError, ValueError):
+                gams_content = json.dumps(
+                    {"status": "finished", "content": content},
+                    ensure_ascii=False,
+                )
+            messages.append({"role": "assistant", "content": gams_content})
+        else:
+            messages.append({"role": "user", "content": content})
+
+    # Dedup consecutive same-role messages (frontend safety guard)
+    deduped: list[dict[str, Any]] = []
+    for msg in messages:
+        if deduped and deduped[-1]["role"] == msg["role"]:
+            deduped[-1]["content"] += "\n" + msg["content"]
+        else:
+            deduped.append(msg)
+    messages = deduped
+
+    try:
+        response = client.chat.completions.create(
+            model=vllm_model_name,
+            messages=messages,
+            temperature=0.6,
+            top_p=0.95,
+            max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+        )
+    except Exception as exc:
+        raise ChatServiceError(
+            f"GaMS strežnik ni dosegljiv: {exc}. "
+            "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+            status_code=503,
+        ) from exc
+
+    text = response.choices[0].message.content or ""
+    if not text:
+        raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+
+    parsed_resp = _parse_gams_json_response(text)
+
+    while "tool" in parsed_resp:
+        kwargs = _coerce_gams_tool_arguments(parsed_resp["tool"], parsed_resp.get("arguments", {}))
+
+        try:
+            result = dispatch_tool(parsed_resp["tool"], kwargs)
+        except Exception as exc:
+            result = {"error": str(exc)}
+
+        msg_text = _build_gams_tool_result_message(parsed_resp["tool"], result)
+
+        new_pairs = [
+            {"role": "assistant", "content": str(parsed_resp)},
+            {"role": "user", "content": msg_text},
+        ]
+        for pair in new_pairs:
+            if messages and messages[-1]["role"] == pair["role"]:
+                messages[-1]["content"] += "\n" + pair["content"]
+            else:
+                messages.append(pair)
+
+        try:
+            response = client.chat.completions.create(
+                model=vllm_model_name,
+                messages=messages,
+                temperature=0.6,
+                top_p=0.95,
+                max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+            )
+        except Exception as exc:
+            raise ChatServiceError(
+                f"GaMS strežnik ni dosegljiv: {exc}. "
+                "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+                status_code=503,
+            ) from exc
+
+        text = response.choices[0].message.content or ""
+        if not text:
+            raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+
+        parsed_resp = _parse_gams_json_response(text)
+
+    if "status" in parsed_resp:
+        if parsed_resp["status"] == "finished":
+            text = parsed_resp["content"]
+
+    usage = response.usage
+    aggregated_usage = {
+        "inputTokens": getattr(usage, "prompt_tokens", 0),
+        "outputTokens": getattr(usage, "completion_tokens", 0),
+        "totalTokens": getattr(usage, "total_tokens", 0),
+        "reasoningTokens": 0,
+    }
+
+    return {
+        "model": {
+            "id": model_id,
+            "label": config["label"],
+            "deployment": vllm_model_name,
+        },
+        "content": text,
+        "citations": [],
+        "webSearchUsed": False,
+        "responseId": response.id,
+        "usage": aggregated_usage,
+    }
+    """Koda pot za GaMS prek vLLM — brez tool callinga."""
+    client = _create_gams_client()
+    vllm_model_name = os.getenv("GAMS_MODEL_NAME", "GaMS3-12B-Instruct")
+
+    messages: list[dict[str, Any]] = []
+
+    messages.append({"role": "user", "content": GAMS_SYSTEM_PROMPT})
+    messages.append({"role": "assistant", "content": "Sedaj bom popolnoma sledil tvojim navodilom in odgovarjal v dogovorjenem JSON formatu"})
+
+    for msg in conversation:
+        role = msg.get("role") or ""
+        content = msg.get("content") or ""
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+
+    try:
+        response = client.chat.completions.create(
+            model=vllm_model_name,
+            messages=messages,
+            temperature=0.6,
+            top_p=0.95,
+            max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+        )
+    except Exception as exc:
+        raise ChatServiceError(
+            f"GaMS strežnik ni dosegljiv: {exc}. "
+            "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+            status_code=503,
+        ) from exc
+
+    text = response.choices[0].message.content or ""
+    if not text:
+        raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+    
+    #text = strip_non_json(text)     #zbirse ce slucajno poleg jsona vrne se kaj drugega
+    parsed_resp = _parse_gams_json_response(text)
+    
+    
+    while "tool" in parsed_resp:
+        kwargs = _coerce_gams_tool_arguments(parsed_resp["tool"], parsed_resp.get("arguments", {}))
+
+        try:
+            result = dispatch_tool(parsed_resp["tool"], kwargs)
+        except Exception as exc:
+            result = {"error": str(exc)}
+        msg = _build_gams_tool_result_message(parsed_resp["tool"], result)
+
+        
+        messages.append({"role": "assistant", "content": f"{parsed_resp}"})
+        messages.append({"role": "user", "content": f"{msg}"})
+        try:
+            response = client.chat.completions.create(
+            model=vllm_model_name,
+            messages=messages,
+            temperature=0.6,
+            top_p=0.95,
+            max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+        )
+        except Exception as exc:
+            raise ChatServiceError(
+                f"GaMS strežnik ni dosegljiv: {exc}. "
+                "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+                status_code=503,
+            ) from exc
+        
+        text = response.choices[0].message.content or ""
+        if not text:
+            raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+        
+        parsed_resp = _parse_gams_json_response(text)
+
+    if "status" in parsed_resp:
+        if parsed_resp["status"] == "finished":
+            text = parsed_resp["content"]
+    
+    usage = response.usage
+    aggregated_usage = {
+        "inputTokens": getattr(usage, "prompt_tokens", 0),
+        "outputTokens": getattr(usage, "completion_tokens", 0),
+        "totalTokens": getattr(usage, "total_tokens", 0),
+        "reasoningTokens": 0,
+    }
+
+    return {
+        "model": {
+            "id": model_id,
+            "label": config["label"],
+            "deployment": vllm_model_name,
+        },
+        "content": text,
+        "citations": [],
+        "webSearchUsed": False,
+        "responseId": response.id,
+        "usage": aggregated_usage,
+    }
 
 if __name__ == "__main__":
     result = run(
