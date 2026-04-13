@@ -309,19 +309,50 @@ def top_k_endangered_in_country(endangerment: str, k: int = -1):
 
     return ranked["EID"].astype(str).tolist()
 
+# fixa crash ko je GaMS podal samo en string v `get_info_by_eids` namesto seznama in je pandas.Series.isin() naredu TypeError.
+# normalizira vrednost v seznam of non-empty stringov zato da se vedno obravnava enako pri toolih
+def _normalize_str_list(value: Any, *, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else []
+    if isinstance(value, (list, tuple, set)):
+        normalized: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            normalized_item = str(item).strip()
+            if normalized_item:
+                normalized.append(normalized_item)
+        return normalized
+    raise ValueError(f"{field_name} must be a string or a list of strings.")
+
+
 def get_info_by_eids(eids: list[str], columns: list[str] | None = None) -> list[dict]:
+    normalized_eids = _normalize_str_list(eids, field_name="eids")
+    normalized_columns = _normalize_str_list(columns, field_name="columns") if columns is not None else None # normaliziramo da ni gams napake
+
+    if not normalized_eids:
+        raise ValueError("At least one EID must be provided.")
+
     gdf = _load_gdf()
-    subset = gdf.drop(columns="geometry", errors="ignore")
-    subset = gdf[gdf["EID"].isin(eids)]
+    records = gdf.drop(columns="geometry", errors="ignore")
+    subset = records[records["EID"].astype(str).isin(normalized_eids)]
+
+    # GaMS je vcasih vracal ESD key (glej rnpd.json) namesto EID oblike "1-xyzwu". 
+    # fallback da gremo pogledat tudi ESD
+    if subset.empty and "ESD" in records.columns:
+        subset = records[records["ESD"].astype(str).isin(normalized_eids)]
 
     if subset.empty:
-        raise ValueError(f"No site was found for EIDs {eids}.")
+        raise ValueError(f"No site was found for EIDs {normalized_eids}.")
 
-    if columns:
-        missing = [column for column in columns if column not in gdf.columns]
+    if normalized_columns:
+        missing = [column for column in normalized_columns if column not in subset.columns]
         if missing:
             raise ValueError(f"Unknown columns: {', '.join(missing)}")
-        subset = subset[columns]
+        subset = subset[normalized_columns]
 
     return subset.to_dict(orient="records")
 
@@ -562,6 +593,89 @@ def _parse_tool_arguments(raw: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("Tool arguments must be a JSON object.")
     return parsed
+
+
+# tool functions, while still accepting already-object-shaped arguments.
+# fixa neujemanje med vračanjem od GaMSa ki je vrača positional arguments (npr. ["Gorenjska", "skupaj_nevarnost", 5])
+# GaMS je dosti bolj konsistenten ce ne rabi vracat valid JSONa vedno
+# dispatch_tool pricakuje kwargs
+# sprejme positional args in valid JSON
+def _coerce_gams_tool_arguments(tool_name: str, raw_arguments: Any) -> dict[str, Any]:
+    if isinstance(raw_arguments, dict):
+        return raw_arguments
+
+    if tool_name == "search_heritage_records":
+        params = ["query", "k"]
+    elif tool_name == "top_k_endangered_in_region":
+        params = ["regija", "endangerment", "k"]
+    elif tool_name == "top_k_endangered_in_municipality":
+        params = ["obcina", "endangerment", "k"]
+    elif tool_name == "top_k_endangered_in_country":
+        params = ["endangerment", "k"]
+    elif tool_name == "get_info_by_eids":
+        params = ["eids", "columns"]
+    else:
+        raise ValueError(f"Unknown tool: {tool_name}")
+
+    if isinstance(raw_arguments, list):
+        return {key: value for key, value in zip(params, raw_arguments)}
+
+    raise ValueError(f"Unsupported arguments format for tool {tool_name}.")
+
+
+# fixa raw JSONDecodeError/Empty-response napake ko je GaMS vracal prazen ali pa invalid JSON en korak po tool-callu
+# repaira model text in validira JOSN
+# raisa ChatServiceError namesto obicen 500 status
+def _parse_gams_json_response(text: str) -> dict[str, Any]:
+    cleaned_text = extract_json(text)
+    if not cleaned_text.strip():
+        raise ChatServiceError(
+            "GaMS je vrnil neveljaven prazen JSON odgovor.",
+            status_code=502,
+        )
+
+    repaired_text = repair_json(cleaned_text)
+
+    if not repaired_text.strip():
+        raise ChatServiceError(
+            "GaMS je vrnil neveljaven prazen JSON odgovor.",
+            status_code=502,
+        )
+
+    try:
+        parsed = json.loads(repaired_text, strict=False)
+    except json.JSONDecodeError as exc:
+        preview = cleaned_text.strip().replace("\n", " ")[:200]
+        raise ChatServiceError(
+            f"GaMS je vrnil neveljaven JSON odgovor. Začetek odgovora: {preview or '<prazen odgovor>'}",
+            status_code=502,
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise ChatServiceError(
+            "GaMS je vrnil JSON odgovor v nepričakovani obliki.",
+            status_code=502,
+        )
+
+    return parsed
+
+
+# popravi drugo krog gamsovega tool calla
+# prej je bil invalid JSON format + typo (msg = f'"funcito_call": "{parsed_resp["tool"]}" "output": "{output}"')
+# gams je izgubil tool v tool chainu ker je pricakov drugacen format in je vrnu invalid JSON (glej sliko v screenshot folderju)
+def _build_gams_tool_result_message(tool_name: str, result: Any) -> str:
+    payload: dict[str, Any] = {
+        "function_call": tool_name,
+        "function_return": _json_safe(result),
+    }
+
+    if tool_name.startswith("top_k_endangered_"):
+        payload["hint"] = (
+            "Dobil si EID-je. Takoj pokliči get_info_by_eids z dobljenimi EID-ji, "
+            "preden sestaviš končni odgovor."
+        )
+
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _response_output_items(response: Any) -> list[Any]:
@@ -898,12 +1012,12 @@ def _json_safe(value: Any) -> Any:
     except ModuleNotFoundError:
         pd = None
 
-    if pd is not None and pd.isna(value):
-        return None
     if isinstance(value, dict):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_json_safe(item) for item in value]
+    if pd is not None and pd.isna(value):
+        return None
     if hasattr(value, "item") and callable(value.item):
         try:
             return _json_safe(value.item())
@@ -942,6 +1056,131 @@ def _generate_gams_reply(
     for msg in conversation:
         role = msg.get("role") or ""
         content = msg.get("content") or ""
+        if not content or role not in ("user", "assistant"):
+            continue
+
+        if role == "assistant":
+            # Normalize: if the stored response is HTML/plain text (not JSON),
+            # wrap it back into the JSON format GaMS expects to see in history.
+            try:
+                json.loads(content)
+                gams_content = content  # already valid JSON from a previous tool-chain turn
+            except (json.JSONDecodeError, ValueError):
+                gams_content = json.dumps(
+                    {"status": "finished", "content": content},
+                    ensure_ascii=False,
+                )
+            messages.append({"role": "assistant", "content": gams_content})
+        else:
+            messages.append({"role": "user", "content": content})
+
+    # Dedup consecutive same-role messages (frontend safety guard)
+    deduped: list[dict[str, Any]] = []
+    for msg in messages:
+        if deduped and deduped[-1]["role"] == msg["role"]:
+            deduped[-1]["content"] += "\n" + msg["content"]
+        else:
+            deduped.append(msg)
+    messages = deduped
+
+    try:
+        response = client.chat.completions.create(
+            model=vllm_model_name,
+            messages=messages,
+            temperature=0.6,
+            top_p=0.95,
+            max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+        )
+    except Exception as exc:
+        raise ChatServiceError(
+            f"GaMS strežnik ni dosegljiv: {exc}. "
+            "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+            status_code=503,
+        ) from exc
+
+    text = response.choices[0].message.content or ""
+    if not text:
+        raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+
+    parsed_resp = _parse_gams_json_response(text)
+
+    while "tool" in parsed_resp:
+        kwargs = _coerce_gams_tool_arguments(parsed_resp["tool"], parsed_resp.get("arguments", {}))
+
+        try:
+            result = dispatch_tool(parsed_resp["tool"], kwargs)
+        except Exception as exc:
+            result = {"error": str(exc)}
+
+        msg_text = _build_gams_tool_result_message(parsed_resp["tool"], result)
+
+        new_pairs = [
+            {"role": "assistant", "content": str(parsed_resp)},
+            {"role": "user", "content": msg_text},
+        ]
+        for pair in new_pairs:
+            if messages and messages[-1]["role"] == pair["role"]:
+                messages[-1]["content"] += "\n" + pair["content"]
+            else:
+                messages.append(pair)
+
+        try:
+            response = client.chat.completions.create(
+                model=vllm_model_name,
+                messages=messages,
+                temperature=0.6,
+                top_p=0.95,
+                max_tokens=CHAT_MAX_OUTPUT_TOKENS,
+            )
+        except Exception as exc:
+            raise ChatServiceError(
+                f"GaMS strežnik ni dosegljiv: {exc}. "
+                "Preverite da teče vLLM na HPC in da je SSH tunel odprt.",
+                status_code=503,
+            ) from exc
+
+        text = response.choices[0].message.content or ""
+        if not text:
+            raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
+
+        parsed_resp = _parse_gams_json_response(text)
+
+    if "status" in parsed_resp:
+        if parsed_resp["status"] == "finished":
+            text = parsed_resp["content"]
+
+    usage = response.usage
+    aggregated_usage = {
+        "inputTokens": getattr(usage, "prompt_tokens", 0),
+        "outputTokens": getattr(usage, "completion_tokens", 0),
+        "totalTokens": getattr(usage, "total_tokens", 0),
+        "reasoningTokens": 0,
+    }
+
+    return {
+        "model": {
+            "id": model_id,
+            "label": config["label"],
+            "deployment": vllm_model_name,
+        },
+        "content": text,
+        "citations": [],
+        "webSearchUsed": False,
+        "responseId": response.id,
+        "usage": aggregated_usage,
+    }
+    """Koda pot za GaMS prek vLLM — brez tool callinga."""
+    client = _create_gams_client()
+    vllm_model_name = os.getenv("GAMS_MODEL_NAME", "GaMS3-12B-Instruct")
+
+    messages: list[dict[str, Any]] = []
+
+    messages.append({"role": "user", "content": GAMS_SYSTEM_PROMPT})
+    messages.append({"role": "assistant", "content": "Sedaj bom popolnoma sledil tvojim navodilom in odgovarjal v dogovorjenem JSON formatu"})
+
+    for msg in conversation:
+        role = msg.get("role") or ""
+        content = msg.get("content") or ""
         if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content})
 
@@ -965,28 +1204,17 @@ def _generate_gams_reply(
         raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
     
     #text = strip_non_json(text)     #zbirse ce slucajno poleg jsona vrne se kaj drugega
-    parsed_resp = json.loads(repair_json(extract_json(text)), strict=False)
+    parsed_resp = _parse_gams_json_response(text)
     
     
     while "tool" in parsed_resp:
-        args = {}
-        if parsed_resp["tool"] == "search_heritage_records":
-            params = ["query", "k"]
-        elif parsed_resp["tool"] == "top_k_endangered_in_region":
-            params = ["regija", "endangerment", "k"]
-        elif parsed_resp["tool"] == "top_k_endangered_in_municipality":
-            params = ["obcina", "endangerment", "k"]
-        elif parsed_resp["tool"] == "get_info_by_eids":
-            params = ["eids", "columns"]
-        
-        kwargs = dict(zip(params, parsed_resp["arguments"]))
+        kwargs = _coerce_gams_tool_arguments(parsed_resp["tool"], parsed_resp.get("arguments", {}))
 
-        result = dispatch_tool(parsed_resp["tool"], kwargs)
-        output = json.dumps(result, ensure_ascii=False, default=str)
-        msg = f'"funcito_call": "{parsed_resp["tool"]}" "output": "{output}"'
-
-        if "k_endangered" in parsed_resp["tool"]:
-            msg += '"nasvet": "Dobil si EID-je. Lahko uporabis urodje "get_info_by_eids" za vec informacij, ki bodo zelo uporabne"'
+        try:
+            result = dispatch_tool(parsed_resp["tool"], kwargs)
+        except Exception as exc:
+            result = {"error": str(exc)}
+        msg = _build_gams_tool_result_message(parsed_resp["tool"], result)
 
         
         messages.append({"role": "assistant", "content": f"{parsed_resp}"})
@@ -1010,7 +1238,7 @@ def _generate_gams_reply(
         if not text:
             raise ChatServiceError("GaMS je vrnil prazen odgovor.", status_code=502)
         
-        parsed_resp = json.loads(repair_json(extract_json(text)), strict=False)
+        parsed_resp = _parse_gams_json_response(text)
 
     if "status" in parsed_resp:
         if parsed_resp["status"] == "finished":
