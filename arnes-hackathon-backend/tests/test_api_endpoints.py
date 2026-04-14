@@ -204,15 +204,12 @@ def test_heritage_sites_supports_etag_and_304(client: TestClient, monkeypatch: p
                 "type": "site",
                 "protectionStatus": None,
                 "municipality": "TEST",
-                "description": None,
-                "elevationM": 337.41,
                 "isCluster": False,
                 "clusterCount": None,
             }
         ],
         "total": 1,
         "sourceCount": 1,
-        "sourceUrl": "local",
     }
     monkeypatch.setattr(api_main, "list_heritage_sites", lambda **kwargs: payload)
     monkeypatch.setattr(api_main, "get_dataset_status", lambda: _dataset_status())
@@ -221,6 +218,14 @@ def test_heritage_sites_supports_etag_and_304(client: TestClient, monkeypatch: p
     first_response = client.get("/api/heritage-sites", params=query)
     assert first_response.status_code == 200
     assert first_response.headers.get("cache-control") == api_main.CACHE_CONTROL_SITES
+    first_item = first_response.json()["items"][0]
+    assert first_item["id"] == "EID-1"
+    assert "description" not in first_item
+    assert "elevationM" not in first_item
+    assert "fireHazard" not in first_item
+    assert "floodHazardOriginal" not in first_item
+    assert "combinedHazard" not in first_item
+    assert "sourceUrl" not in first_response.json()
 
     etag = first_response.headers.get("etag")
     assert etag
@@ -241,11 +246,17 @@ def test_heritage_site_detail_supports_etag_and_304(client: TestClient, monkeypa
         "protectionStatus": "protected",
         "municipality": "TEST",
         "description": "Detailed description",
-        "elevationM": 337.41,
-        "isCluster": False,
-        "clusterCount": None,
-        "detailFields": [{"label": "Datacija", "value": "19. stol."}],
-        "sourceUrl": "local",
+        "dating": "19. stol.",
+        "locationDescription": "Near the old bridge.",
+        "photoUrl": "https://example.com/photo.jpg",
+        "fireHazard": 0.2,
+        "floodHazard": 0.8,
+        "landslideHazard": 0.0,
+        "earthquakeHazard": 4.0,
+        "fireHazardOriginal": 0.0,
+        "floodHazardOriginal": 1.0,
+        "landslideHazardOriginal": 1.0,
+        "earthquakeHazardOriginal": 3.0,
     }
 
     monkeypatch.setattr(
@@ -258,6 +269,17 @@ def test_heritage_site_detail_supports_etag_and_304(client: TestClient, monkeypa
     first_response = client.get("/api/heritage-sites/EID-42")
     assert first_response.status_code == 200
     assert first_response.headers.get("cache-control") == api_main.CACHE_CONTROL_SITE_DETAIL
+    detail_payload = first_response.json()
+    assert detail_payload["fireHazard"] == 0.2
+    assert detail_payload["fireHazardOriginal"] == 0.0
+    assert detail_payload["description"] == "Detailed description"
+    assert detail_payload["dating"] == "19. stol."
+    assert detail_payload["locationDescription"] == "Near the old bridge."
+    assert detail_payload["photoUrl"] == "https://example.com/photo.jpg"
+    assert "elevationM" not in detail_payload
+    assert "combinedHazard" not in detail_payload
+    assert "detailFields" not in detail_payload
+    assert "sourceUrl" not in detail_payload
 
     etag = first_response.headers.get("etag")
     assert etag

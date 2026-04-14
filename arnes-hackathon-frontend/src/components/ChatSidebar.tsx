@@ -7,6 +7,7 @@ import {
 	sendChatMessage,
 } from "@/lib/heritage-api";
 import SafeHtmlContent from "@/components/SafeHtmlContent";
+import { EXPLAIN_SITE_EVENT, type ExplainSiteEventDetail } from "@/components/chat-events";
 import { useLanguage } from "@/lib/i18n";
 import { Bot, RefreshCcw, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -16,6 +17,8 @@ const CHAT_MODEL_ID = "heritage-chat-model";
 const CHAT_MODEL_STORAGE_KEY = "heritage-chat-model-id";
 const CHAT_INPUT_MIN_HEIGHT = 44;
 const CHAT_INPUT_MAX_HEIGHT = 160;
+const ALLOWED_CHAT_MODEL_IDS = new Set(["mdml-gpt5-2-001", "gams-3-12b"]);
+const MODEL_LOAD_RETRY_MS = 3_000;
 
 interface UiMessage extends ChatMessage {
 	id: string;
@@ -39,6 +42,8 @@ const ChatSidebar = () => {
 	const [models, setModels] = useState<ChatModelDescriptor[]>([]);
 	const [selectedModelId, setSelectedModelId] = useState("");
 	const [configError, setConfigError] = useState<string | null>(null);
+	const [modelsLoadFailed, setModelsLoadFailed] = useState(false);
+	const [modelsReloadNonce, setModelsReloadNonce] = useState(0);
 	const [requestError, setRequestError] = useState<string | null>(null);
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -53,101 +58,14 @@ const ChatSidebar = () => {
 		element.style.overflowY = element.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? "auto" : "hidden";
 	};
 
-	useEffect(() => {
-		setMessages((prev) => {
-			if (prev.length === 0) return prev;
-			if (!prev[0].isWelcome) return prev;
-			return [{ ...prev[0], content: m.chat.welcome }, ...prev.slice(1)];
-		});
-	}, [m.chat.welcome]);
-
-	useEffect(() => {
-		bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-	}, [messages, loading]);
-
-	useEffect(() => {
-		if (!composerRef.current) return;
-		resizeComposer(composerRef.current);
-	}, [input]);
-
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		const storedModelId = window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "";
-		if (storedModelId) {
-			setSelectedModelId(storedModelId);
-		}
-	}, []);
-
-	useEffect(() => {
-		if (typeof window === "undefined") return;
-		if (selectedModelId) {
-			window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, selectedModelId);
-		}
-	}, [selectedModelId]);
-
-	useEffect(() => {
-		const controller = new AbortController();
-
-		const loadModels = async () => {
-			try {
-				setConfigError(null);
-				const response = await fetchChatModels(controller.signal);
-				setModels(response.items);
-
-				const storedModelId =
-					typeof window === "undefined"
-						? ""
-						: window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "";
-				const availableIds = response.items.filter((item) => item.available).map((item) => item.id);
-				const preferredId =
-					(storedModelId && availableIds.includes(storedModelId) && storedModelId) ||
-					availableIds.find((item) => item === response.defaultModelId) ||
-					availableIds[0] ||
-					response.items[0]?.id ||
-					"";
-
-				setSelectedModelId(preferredId);
-				if (response.items.length === 0) {
-					setConfigError(m.chat.noModelsConfigured);
-				} else if (availableIds.length === 0) {
-					setConfigError(m.chat.noModelsAvailable);
-				}
-			} catch (error) {
-				if (controller.signal.aborted) return;
-				setConfigError(error instanceof ApiError && error.detail ? error.detail : m.chat.loadModelsFailed);
-			}
-		};
-
-		void loadModels();
-
-		return () => controller.abort();
-	}, [m.chat.loadModelsFailed, m.chat.noModelsAvailable, m.chat.noModelsConfigured]);
-
-	const availableModels = models.filter((model) => model.available);
-	const selectedModel = models.find((model) => model.id === selectedModelId) || null;
-	const canSend = !!input.trim() && !loading && !!selectedModel && selectedModel.available;
-
-	const handleResetConversation = () => {
-		if (loading) return;
-		setMessages([
-			{
-				id: "welcome",
-				role: "assistant",
-				content: m.chat.welcome,
-				isWelcome: true,
-			},
-		]);
-		setRequestError(null);
-	};
-
-	const handleSend = async () => {
-		const text = input.trim();
-		if (!text || loading || !selectedModel || !selectedModel.available) return;
+	const sendMessage = async (text: string) => {
+		const normalizedText = text.trim();
+		if (!normalizedText || loading || !selectedModel || !selectedModel.available) return;
 
 		const userMessage: UiMessage = {
 			id: `user-${Date.now()}`,
 			role: "user",
-			content: text,
+			content: normalizedText,
 		};
 
 		const requestMessages = [...messages, userMessage]
@@ -184,6 +102,133 @@ const ChatSidebar = () => {
 		} finally {
 			setLoading(false);
 		}
+	};
+
+	useEffect(() => {
+		setMessages((prev) => {
+			if (prev.length === 0) return prev;
+			if (!prev[0].isWelcome) return prev;
+			return [{ ...prev[0], content: m.chat.welcome }, ...prev.slice(1)];
+		});
+	}, [m.chat.welcome]);
+
+	useEffect(() => {
+		bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+	}, [messages, loading]);
+
+	useEffect(() => {
+		if (!composerRef.current) return;
+		resizeComposer(composerRef.current);
+	}, [input]);
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		const storedModelId = window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "";
+		if (storedModelId) {
+			setSelectedModelId(storedModelId);
+		}
+	}, []);
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+		if (selectedModelId) {
+			window.localStorage.setItem(CHAT_MODEL_STORAGE_KEY, selectedModelId);
+		}
+	}, [selectedModelId]);
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const handleOnline = () => {
+			setModelsReloadNonce((value) => value + 1);
+		};
+
+		window.addEventListener("online", handleOnline);
+		return () => window.removeEventListener("online", handleOnline);
+	}, []);
+
+	useEffect(() => {
+		const controller = new AbortController();
+
+		const loadModels = async () => {
+			try {
+				setConfigError(null);
+				setModelsLoadFailed(false);
+				const response = await fetchChatModels(controller.signal);
+				const filteredModels = response.items.filter((item) => ALLOWED_CHAT_MODEL_IDS.has(item.id));
+				setModels(filteredModels);
+
+				const storedModelId =
+					typeof window === "undefined"
+						? ""
+						: window.localStorage.getItem(CHAT_MODEL_STORAGE_KEY) || "";
+				const availableIds = filteredModels.filter((item) => item.available).map((item) => item.id);
+				const preferredId =
+					(storedModelId && availableIds.includes(storedModelId) && storedModelId) ||
+					availableIds.find((item) => item === response.defaultModelId) ||
+					availableIds[0] ||
+					filteredModels[0]?.id ||
+					"";
+
+				setSelectedModelId(preferredId);
+				if (filteredModels.length === 0) {
+					setConfigError(m.chat.noModelsConfigured);
+				} else if (availableIds.length === 0) {
+					setConfigError(m.chat.noModelsAvailable);
+				}
+			} catch (error) {
+				if (controller.signal.aborted) return;
+				setModelsLoadFailed(true);
+				setConfigError(error instanceof ApiError && error.detail ? error.detail : m.chat.loadModelsFailed);
+			}
+		};
+
+		void loadModels();
+
+		return () => controller.abort();
+	}, [m.chat.loadModelsFailed, m.chat.noModelsAvailable, m.chat.noModelsConfigured, modelsReloadNonce]);
+
+	useEffect(() => {
+		if (!modelsLoadFailed) return;
+		const retryTimer = window.setTimeout(() => {
+			setModelsReloadNonce((value) => value + 1);
+		}, MODEL_LOAD_RETRY_MS);
+		return () => window.clearTimeout(retryTimer);
+	}, [modelsLoadFailed, modelsReloadNonce]);
+
+	const availableModels = models.filter((model) => model.available);
+	const selectedModel = models.find((model) => model.id === selectedModelId) || null;
+	const canSend = !!input.trim() && !loading && !!selectedModel && selectedModel.available;
+
+	useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const handleExplainSite = (event: Event) => {
+			const customEvent = event as CustomEvent<ExplainSiteEventDetail>;
+			const prompt = customEvent.detail?.prompt?.trim();
+			if (!prompt || loading) return;
+			void sendMessage(prompt);
+		};
+
+		window.addEventListener(EXPLAIN_SITE_EVENT, handleExplainSite as EventListener);
+		return () => window.removeEventListener(EXPLAIN_SITE_EVENT, handleExplainSite as EventListener);
+	}, [loading, messages, selectedModel, m.chat.requestFailed]);
+
+	const handleResetConversation = () => {
+		if (loading) return;
+		setMessages([
+			{
+				id: "welcome",
+				role: "assistant",
+				content: m.chat.welcome,
+				isWelcome: true,
+			},
+		]);
+		setRequestError(null);
+	};
+
+	const handleSend = async () => {
+		await sendMessage(input);
 	};
 
 	return (
