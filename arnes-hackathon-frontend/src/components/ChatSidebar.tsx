@@ -18,6 +18,7 @@ const CHAT_MODEL_STORAGE_KEY = "heritage-chat-model-id";
 const CHAT_INPUT_MIN_HEIGHT = 44;
 const CHAT_INPUT_MAX_HEIGHT = 160;
 const ALLOWED_CHAT_MODEL_IDS = new Set(["mdml-gpt5-2-001", "gams-3-12b"]);
+const MODEL_LOAD_RETRY_MS = 3_000;
 
 interface UiMessage extends ChatMessage {
 	id: string;
@@ -41,6 +42,8 @@ const ChatSidebar = () => {
 	const [models, setModels] = useState<ChatModelDescriptor[]>([]);
 	const [selectedModelId, setSelectedModelId] = useState("");
 	const [configError, setConfigError] = useState<string | null>(null);
+	const [modelsLoadFailed, setModelsLoadFailed] = useState(false);
+	const [modelsReloadNonce, setModelsReloadNonce] = useState(0);
 	const [requestError, setRequestError] = useState<string | null>(null);
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -79,7 +82,6 @@ const ChatSidebar = () => {
 				messages: requestMessages,
 				modelId: selectedModel.id,
 			});
-			console.log("Chat response payload:", response);
 
 			setMessages((prev) => [
 				...prev,
@@ -135,11 +137,23 @@ const ChatSidebar = () => {
 	}, [selectedModelId]);
 
 	useEffect(() => {
+		if (typeof window === "undefined") return;
+
+		const handleOnline = () => {
+			setModelsReloadNonce((value) => value + 1);
+		};
+
+		window.addEventListener("online", handleOnline);
+		return () => window.removeEventListener("online", handleOnline);
+	}, []);
+
+	useEffect(() => {
 		const controller = new AbortController();
 
 		const loadModels = async () => {
 			try {
 				setConfigError(null);
+				setModelsLoadFailed(false);
 				const response = await fetchChatModels(controller.signal);
 				const filteredModels = response.items.filter((item) => ALLOWED_CHAT_MODEL_IDS.has(item.id));
 				setModels(filteredModels);
@@ -164,6 +178,7 @@ const ChatSidebar = () => {
 				}
 			} catch (error) {
 				if (controller.signal.aborted) return;
+				setModelsLoadFailed(true);
 				setConfigError(error instanceof ApiError && error.detail ? error.detail : m.chat.loadModelsFailed);
 			}
 		};
@@ -171,7 +186,15 @@ const ChatSidebar = () => {
 		void loadModels();
 
 		return () => controller.abort();
-	}, [m.chat.loadModelsFailed, m.chat.noModelsAvailable, m.chat.noModelsConfigured]);
+	}, [m.chat.loadModelsFailed, m.chat.noModelsAvailable, m.chat.noModelsConfigured, modelsReloadNonce]);
+
+	useEffect(() => {
+		if (!modelsLoadFailed) return;
+		const retryTimer = window.setTimeout(() => {
+			setModelsReloadNonce((value) => value + 1);
+		}, MODEL_LOAD_RETRY_MS);
+		return () => window.clearTimeout(retryTimer);
+	}, [modelsLoadFailed, modelsReloadNonce]);
 
 	const availableModels = models.filter((model) => model.available);
 	const selectedModel = models.find((model) => model.id === selectedModelId) || null;

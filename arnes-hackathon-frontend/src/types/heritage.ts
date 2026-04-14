@@ -1,4 +1,4 @@
-export interface HeritageSiteSummary {
+export interface HeritageSiteBase {
 	id: string;
 	registryId?: string;
 	name: string;
@@ -7,30 +7,31 @@ export interface HeritageSiteSummary {
 	type?: string;
 	protectionStatus?: string;
 	municipality?: string;
-	description?: string;
-	elevationM?: number;
-	fireHazard?: number;
-	floodHazard?: number;
-	landslideHazard?: number;
-	earthquakeHazard?: number;
-	combinedHazard?: number;
+}
+
+export interface HeritageSiteSummary extends HeritageSiteBase {
 	isCluster?: boolean;
 	clusterCount?: number;
 }
 
-export interface HeritageSiteField {
-	label: string;
-	value: string;
-}
-
-export interface HeritageSiteDetail extends HeritageSiteSummary {
-	detailFields: HeritageSiteField[];
-	sourceUrl: string;
+export interface HeritageSiteDetail extends HeritageSiteBase {
+	isCluster?: boolean;
+	description?: string;
+	dating?: string;
+	locationDescription?: string;
+	photoUrl?: string;
+	fireHazard?: number;
+	floodHazard?: number;
+	landslideHazard?: number;
+	earthquakeHazard?: number;
+	fireHazardOriginal?: number;
+	floodHazardOriginal?: number;
+	landslideHazardOriginal?: number;
+	earthquakeHazardOriginal?: number;
 }
 
 export interface HeritageSiteListResponse {
 	items: HeritageSiteSummary[];
 	total: number;
 	sourceCount: number;
-	sourceUrl: string;
 }

@@ -1310,6 +1310,7 @@ def main() -> None:
      # skupna_ocena
     gdf = gpd.read_file("./Data/kd_z_nevarnost_enriched_verified.geojson")
     gdf['pozar_ocena_popravljena'] = 4 - gdf['pozar_ocena_popravljena']
+    gdf['pozar'] = 4 - gdf['pozar'] # predlagam da tudi originalno oceno invertamo ker je 1="zelo ogrozeno" pac cudasko in naredimo 0...4 scale
     gdf['potres_ocena_popravljena'] = 2 * gdf['potres_ocena_popravljena']
     gdf['skupaj_nevarnost'] = gdf['pozar_ocena_popravljena'] + gdf['poplave_ocena_popravljena'] + gdf['plazovi_ocena_popravljena'] + gdf['potres_ocena_popravljena']
     gdf.to_file("./Data/kd_z_nevarnost_enriched_verified.geojson", driver="GeoJSON")

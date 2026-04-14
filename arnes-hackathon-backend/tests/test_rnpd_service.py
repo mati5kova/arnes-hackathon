@@ -166,6 +166,10 @@ def test_normalize_record_extracts_corrected_hazard_fields():
         "name": "Hazard Site",
         "lat": 46.1234,
         "lng": 14.5678,
+        "pozar": 0.0,
+        "poplave": 1.0,
+        "plazovi": 1.0,
+        "potres": 3.0,
         "pozar_ocena_popravljena": 0.2,
         "poplave_ocena_popravljena": 0.8,
         "plazovi_ocena_popravljena": 0.0,
@@ -179,7 +183,103 @@ def test_normalize_record_extracts_corrected_hazard_fields():
     assert normalized["floodHazard"] == 0.8
     assert normalized["landslideHazard"] == 0.0
     assert normalized["earthquakeHazard"] == 4.0
+    assert normalized["fireHazardOriginal"] == 0.0
+    assert normalized["floodHazardOriginal"] == 1.0
+    assert normalized["landslideHazardOriginal"] == 1.0
+    assert normalized["earthquakeHazardOriginal"] == 3.0
     assert normalized["combinedHazard"] == 5.0
+
+
+def test_normalize_record_extracts_explicit_card_detail_fields():
+    record = {
+        "id": "EID-5",
+        "name": "Card Detail Site",
+        "lat": 46.1234,
+        "lng": 14.5678,
+        "datacija": "19. stol.",
+        "lokacijaopis": "Near the old bridge.",
+        "photourl": "https://example.com/photo.jpg",
+        "obcina": "MEDVODE",
+        "status": "spomenik lokalnega pomena",
+    }
+
+    normalized = normalize_record(record, 0)
+    assert normalized is not None
+    assert normalized["dating"] == "19. stol."
+    assert normalized["locationDescription"] == "Near the old bridge."
+    assert normalized["photoUrl"] == "https://example.com/photo.jpg"
+    assert normalized["municipality"] == "MEDVODE"
+    assert normalized["protectionStatus"] == "spomenik lokalnega pomena"
+
+
+def test_normalize_record_excludes_hazard_and_elevation_raw_fields_from_detail_fields():
+    record = {
+        "id": "EID-4",
+        "name": "Filtered Details Site",
+        "lat": 46.1234,
+        "lng": 14.5678,
+        "z": 321.9,
+        "visina_m": 321.9,
+        "potres": 3.0,
+        "pozar_ocena_popravljena": 0.2,
+        "tip_najblizje_reke": "hudournik",
+        "rezim_toka_najblizje_reke": "periodicen",
+        "vrsta_najblizje_reke": "vodotok",
+        "visina_najblizje_reke_m": 300.1,
+        "relativna_visina_nad_najblizjo_reko_m": 21.8,
+        "lokalni_naklon_stopinje": 9.5,
+        "lega_terena": "pobočje",
+        "dvignjena_terasa": True,
+        "pas_razdalje_do_reke": "50-100m",
+        "srednje_dalec": 1,
+        "pas_razdalje_do_poplavnega_obmocja": "100-200m",
+        "ime_najblizje_reke": "Sava Bohinjka",
+        "zanesljivost_konteksta_terena": 0.9,
+        "metoda_konteksta_terena": "terrain-v2",
+        "uradna_ocena_poplav": 2.0,
+        "ocena_blizine_poplav": 1.8,
+        "pas_poplavne_nevarnosti": "srednja",
+        "utemeljitev_poplav": "uradni sloj",
+        "razlicica_modela_poplav": "2026-04",
+        "utemeljitev_popravka_nevarnosti": "kontekst terena",
+        "status_preveritve": "verified",
+        "opombe_preveritve": "manual pass",
+        "viri": "drsv, arso",
+        "custom_field": "keep-me",
+    }
+
+    normalized = normalize_record(record, 0)
+    assert normalized is not None
+
+    labels = {field["label"] for field in normalized["detailFields"]}
+    assert "Z" not in labels
+    assert "Visina M" not in labels
+    assert "Potres" not in labels
+    assert "Pozar Ocena Popravljena" not in labels
+    assert "Tip Najblizje Reke" not in labels
+    assert "Rezim Toka Najblizje Reke" not in labels
+    assert "Vrsta Najblizje Reke" not in labels
+    assert "Visina Najblizje Reke M" not in labels
+    assert "Relativna Visina Nad Najblizjo Reko M" not in labels
+    assert "Lokalni Naklon Stopinje" not in labels
+    assert "Lega Terena" not in labels
+    assert "Dvignjena Terasa" not in labels
+    assert "Pas Razdalje Do Reke" not in labels
+    assert "Srednje Dalec" not in labels
+    assert "Pas Razdalje Do Poplavnega Obmocja" not in labels
+    assert "Ime Najblizje Reke" not in labels
+    assert "Zanesljivost Konteksta Terena" not in labels
+    assert "Metoda Konteksta Terena" not in labels
+    assert "Uradna Ocena Poplav" not in labels
+    assert "Ocena Blizine Poplav" not in labels
+    assert "Pas Poplavne Nevarnosti" not in labels
+    assert "Utemeljitev Poplav" not in labels
+    assert "Razlicica Modela Poplav" not in labels
+    assert "Utemeljitev Popravka Nevarnosti" not in labels
+    assert "Status Preveritve" not in labels
+    assert "Opombe Preveritve" not in labels
+    assert "Viri" not in labels
+    assert "Custom Field" in labels
 
 
 def test_score_search_match_suppresses_short_detail_only_queries():

@@ -10,11 +10,47 @@ interface SiteDialogProps {
 	onOpenChange: (open: boolean) => void;
 }
 
+function formatHazardScore(value?: number) {
+	return typeof value === "number" ? value.toFixed(1) : "-";
+}
+
 const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogProps) => {
 	const { m } = useLanguage();
 	if (!site) return null;
 
-	const detailFields = "detailFields" in site ? site.detailFields : [];
+	const detailedSite = hasDetailedFields(site) ? site : null;
+	const detailRows = detailedSite
+		? [
+				{ label: m.siteDialog.dating, value: detailedSite.dating },
+				{ label: m.siteDialog.locationDescription, value: detailedSite.locationDescription },
+				{ label: m.siteDialog.municipality, value: detailedSite.municipality },
+				{ label: m.siteDialog.protection, value: detailedSite.protectionStatus },
+			].filter((row) => Boolean(row.value))
+		: [];
+	const hazardRows = [
+		{
+			label: m.siteDialog.hazardFlood,
+			original: detailedSite?.floodHazardOriginal,
+			enriched: detailedSite?.floodHazard,
+		},
+		{
+			label: m.siteDialog.hazardFire,
+			original: detailedSite?.fireHazardOriginal,
+			enriched: detailedSite?.fireHazard,
+		},
+		{
+			label: m.siteDialog.hazardLandslide,
+			original: detailedSite?.landslideHazardOriginal,
+			enriched: detailedSite?.landslideHazard,
+		},
+		{
+			label: m.siteDialog.hazardEarthquake,
+			original: detailedSite?.earthquakeHazardOriginal,
+			enriched: detailedSite?.earthquakeHazard,
+		},
+	];
+	const hasHazardComparison = hazardRows.some((row) => typeof row.original === "number" || typeof row.enriched === "number");
+
 	const handleExplainSite = () => {
 		if (typeof window === "undefined" || site.isCluster) return;
 		window.dispatchEvent(
@@ -61,12 +97,6 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 								<dd>{site.protectionStatus}</dd>
 							</div>
 						)}
-						{typeof site.elevationM === "number" && (
-							<div>
-								<dt className="font-medium text-foreground">{m.siteDialog.elevation}</dt>
-								<dd>{site.elevationM.toFixed(2)} m</dd>
-							</div>
-						)}
 						<div className="md:col-span-2">
 							<dt className="font-medium text-foreground">{m.siteDialog.coordinates}</dt>
 							<dd>
@@ -75,7 +105,7 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 						</div>
 					</dl>
 
-					{site.description && <p className="leading-relaxed text-foreground">{site.description}</p>}
+					{detailedSite?.description && <p className="leading-relaxed text-foreground">{detailedSite.description}</p>}
 
 					{loading && (
 						<div
@@ -87,20 +117,54 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 						</div>
 					)}
 
-					{detailFields.length > 0 && (
+					{(detailRows.length > 0 || detailedSite?.photoUrl || hasHazardComparison) && (
 						<div className="space-y-2">
-							<div className="font-medium text-foreground">{m.siteDialog.additionalData}</div>
 							<dl className="max-h-72 space-y-2 overflow-y-auto rounded-md border border-border p-3">
-								{detailFields.map((field) => (
-									<div key={`${field.label}-${field.value}`}>
-										<dt className="font-medium text-foreground">{field.label}</dt>
-										<dd className="text-muted-foreground">{field.value}</dd>
+								{detailRows.map((row) => (
+									<div key={row.label}>
+										<dt className="font-medium text-foreground">{row.label}</dt>
+										<dd className="text-muted-foreground">{row.value}</dd>
 									</div>
 								))}
+                                {/* vse slike ki nimajo slike se koncajo z kf_eid.jpg namesto nekim dejanskim url-jem */}
+								{detailedSite?.photoUrl && !detailedSite?.photoUrl.endsWith("kf_eid.jpg") && (
+									<div>
+										<dt className="font-medium text-foreground">{m.siteDialog.photo}</dt>
+										<dd className="text-muted-foreground">
+											<a
+												href={detailedSite.photoUrl}
+												target="_blank"
+												rel="noreferrer"
+												className="break-all underline-offset-2 hover:underline"
+											>
+												{detailedSite.photoUrl}
+											</a>
+										</dd>
+									</div>
+								)}
+								{hasHazardComparison && (
+									<div className={detailRows.length > 0 || detailedSite?.photoUrl ? "border-t border-border pt-3" : undefined}>
+										<dt className="font-medium text-foreground">{m.siteDialog.hazardComparisonTitle}</dt>
+										<dd className="mt-2">
+											<div className="grid grid-cols-3 gap-2 text-muted-foreground">
+												<div className="font-medium text-foreground" />
+												<div className="font-medium text-foreground">{m.siteDialog.hazardOriginal}</div>
+												<div className="font-medium text-foreground">{m.siteDialog.hazardEnriched}</div>
+												{hazardRows.map((row) => (
+													<div key={row.label} className="contents">
+														<div>{row.label}</div>
+														<div>{formatHazardScore(row.original)}</div>
+														<div>{formatHazardScore(row.enriched)}</div>
+													</div>
+												))}
+											</div>
+										</dd>
+									</div>
+								)}
 							</dl>
 						</div>
 					)}
-                    {!site.isCluster && (
+					{!site.isCluster && (
 						<div className="flex justify-end">
 							<button
 								type="button"
@@ -118,3 +182,14 @@ const SiteDialog = ({ site, open, loading = false, onOpenChange }: SiteDialogPro
 };
 
 export default SiteDialog;
+
+function hasDetailedFields(site: HeritageSiteSummary | HeritageSiteDetail): site is HeritageSiteDetail {
+	return (
+		"description" in site ||
+		"dating" in site ||
+		"locationDescription" in site ||
+		"photoUrl" in site ||
+		"fireHazard" in site ||
+		"floodHazard" in site
+	);
+}

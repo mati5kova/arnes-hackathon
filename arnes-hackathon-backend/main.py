@@ -87,7 +87,7 @@ class HealthResponse(BaseModel):
     )
 
 
-class HeritageSiteSummary(BaseModel):
+class HeritageSiteBase(BaseModel):
     id: str = Field(description="Stable site ID (typically EID from RNPD).", examples=["1-02508"])
     registryId: Optional[str] = Field(
         default=None,
@@ -115,15 +115,46 @@ class HeritageSiteSummary(BaseModel):
         description="Municipality or nearest locality field from source data.",
         examples=["MEDVODE"],
     )
+
+
+class HeritageSiteSummary(HeritageSiteBase):
+    isCluster: Optional[bool] = Field(
+        default=None,
+        description="True when this item is a synthetic cluster marker (not a single site).",
+        examples=[False, True],
+    )
+    clusterCount: Optional[int] = Field(
+        default=None,
+        description="Number of sites represented by cluster marker.",
+        examples=[18],
+    )
+
+
+class HeritageSiteDetail(HeritageSiteBase):
+    isCluster: Optional[bool] = Field(
+        default=None,
+        description="True when this item is a synthetic cluster marker (normally absent for real site details).",
+        examples=[False],
+    )
     description: Optional[str] = Field(
         default=None,
         description="Short textual description if available.",
         examples=["Baročna cerkev v jedru Spodnjih Pirnic."],
     )
-    elevationM: Optional[float] = Field(
+    dating: Optional[str] = Field(
         default=None,
-        description="Site elevation in meters when available from enriched spatial data.",
-        examples=[337.41],
+        description="RNPD `DATACIJA` value when available.",
+        examples=["17. stol."],
+    )
+    locationDescription: Optional[str] = Field(
+        default=None,
+        description="RNPD `LOKACIJAOPIS` value when available.",
+        examples=["Cerkev stoji v jedru naselja."],
+    )
+    photoUrl: Optional[str] = Field(
+        default=None,
+        description="RNPD `PHOTOURL` value when available.",
+        examples=["https://ised.gov.si/statika/KF_RNPD/kf_1_02508.jpg"],
     )
     fireHazard: Optional[float] = Field(
         default=None,
@@ -145,37 +176,25 @@ class HeritageSiteSummary(BaseModel):
         description="Corrected earthquake hazard score for this site when available.",
         examples=[4.0],
     )
-    combinedHazard: Optional[float] = Field(
+    fireHazardOriginal: Optional[float] = Field(
         default=None,
-        description="Combined corrected hazard score across supported hazard types when available.",
-        examples=[5.0],
+        description="Original fire hazard score from source data when available.",
+        examples=[0.0],
     )
-    isCluster: Optional[bool] = Field(
+    floodHazardOriginal: Optional[float] = Field(
         default=None,
-        description="True when this item is a synthetic cluster marker (not a single site).",
-        examples=[False, True],
+        description="Original flood hazard score from source data when available.",
+        examples=[1.0],
     )
-    clusterCount: Optional[int] = Field(
+    landslideHazardOriginal: Optional[float] = Field(
         default=None,
-        description="Number of sites represented by cluster marker.",
-        examples=[18],
+        description="Original landslide hazard score from source data when available.",
+        examples=[1.0],
     )
-
-
-class HeritageSiteField(BaseModel):
-    label: str = Field(description="Humanized source field name.", examples=["Datacija"])
-    value: str = Field(description="Stringified source value.", examples=["17. stol."])
-
-
-class HeritageSiteDetail(HeritageSiteSummary):
-    detailFields: List[HeritageSiteField] = Field(
-        description="Additional metadata fields extracted from source, excluding primary summary fields."
-    )
-    sourceUrl: str = Field(
-        description="Configured source URL reference (informational).",
-        examples=[
-            "https://podatki.gov.si/dataset/6b5bf6d9-d3bd-4231-95ac-3863b6d70c56/resource/1b0d4a0b-45d4-484b-a760-d0ed14426230/download/rnpd.json"
-        ],
+    earthquakeHazardOriginal: Optional[float] = Field(
+        default=None,
+        description="Original earthquake hazard score from source data when available.",
+        examples=[3.0],
     )
 
 
@@ -185,7 +204,6 @@ class HeritageSiteListResponse(BaseModel):
     )
     total: int = Field(description="Number of matching real sites before limit/clustering.", examples=[236])
     sourceCount: int = Field(description="Total number of raw records loaded from source dataset.", examples=[31083])
-    sourceUrl: str = Field(description="Configured source URL reference.", examples=["https://podatki.gov.si/.../rnpd.json"])
 
 
 class ErrorResponse(BaseModel):
@@ -705,14 +723,12 @@ async def overlay_grid(
                                         "type": "Cluster",
                                         "protectionStatus": None,
                                         "municipality": None,
-                                        "description": "Zoom in to view individual heritage sites.",
                                         "isCluster": True,
                                         "clusterCount": 18,
                                     }
                                 ],
                                 "total": 236,
                                 "sourceCount": 31083,
-                                "sourceUrl": "https://podatki.gov.si/.../rnpd.json",
                             },
                         },
                         "search_spodnje_pirnice": {
@@ -728,14 +744,12 @@ async def overlay_grid(
                                         "type": "sakralna stavbna dediščina",
                                         "protectionStatus": "spomenik lokalnega pomena",
                                         "municipality": "MEDVODE",
-                                        "description": "Baročna cerkev v jedru Spodnjih Pirnic.",
                                         "isCluster": False,
                                         "clusterCount": None,
                                     }
                                 ],
                                 "total": 3,
                                 "sourceCount": 31083,
-                                "sourceUrl": "https://podatki.gov.si/.../rnpd.json",
                             },
                         },
                     }
@@ -860,7 +874,7 @@ async def heritage_sites(
     tags=["Heritage Sites"],
     summary="Get Heritage Site Details",
     description=(
-        "Returns a single site with expanded `detailFields` metadata.\n\n"
+        "Returns a single site with fixed RNPD card fields and hazard comparison values.\n\n"
         "Use an `id` returned by `/api/heritage-sites` list/search responses."
     ),
     response_model=HeritageSiteDetail,
@@ -882,13 +896,17 @@ async def heritage_sites(
                                 "protectionStatus": "spomenik lokalnega pomena",
                                 "municipality": "MEDVODE",
                                 "description": "Baročna cerkev v jedru Spodnjih Pirnic.",
-                                "isCluster": False,
-                                "clusterCount": None,
-                                "detailFields": [
-                                    {"label": "Datacija", "value": "17. stol."},
-                                    {"label": "Zavod", "value": "ZVKD Ljubljana"},
-                                ],
-                                "sourceUrl": "https://podatki.gov.si/.../rnpd.json",
+                                "dating": "17. stol.",
+                                "locationDescription": "Cerkev stoji v jedru Spodnjih Pirnic.",
+                                "photoUrl": "https://ised.gov.si/statika/KF_RNPD/kf_1_02508.jpg",
+                                "floodHazardOriginal": 1.0,
+                                "floodHazard": 0.8,
+                                "fireHazardOriginal": 0.0,
+                                "fireHazard": 0.2,
+                                "landslideHazardOriginal": 1.0,
+                                "landslideHazard": 0.0,
+                                "earthquakeHazardOriginal": 3.0,
+                                "earthquakeHazard": 4.0,
                             },
                         }
                     }
