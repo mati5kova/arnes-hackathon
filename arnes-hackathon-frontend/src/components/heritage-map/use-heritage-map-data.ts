@@ -1,6 +1,6 @@
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { ApiError, fetchApiHealth, fetchHeritageSite, fetchHeritageSites, fetchOverlayGrid } from "@/lib/heritage-api";
-import type { HeritageSiteSummary } from "@/types/heritage";
+import type { HeritageSiteDetail, HeritageSiteSummary } from "@/types/heritage";
 import type { OverlayKind } from "@/types/overlays";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
@@ -131,7 +131,7 @@ export function useHeritageMapData({
 	const markerSites = markersQuery.data?.items ?? [];
 	const shouldShowSearch = searchQuery.trim().length > 1;
 	const searchResults = shouldShowSearch ? (searchResultsQuery.data?.items ?? []) : [];
-	const selectedSite = siteDetailQuery.data ?? selectedSitePreview;
+	const selectedSite: HeritageSiteSummary | HeritageSiteDetail | null = siteDetailQuery.data ?? selectedSitePreview;
 
 	return {
 		markersQuery,

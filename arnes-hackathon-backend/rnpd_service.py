@@ -27,9 +27,10 @@ RNPD_PREPROCESSED_CACHE_ENABLED = os.getenv("RNPD_PREPROCESSED_CACHE_ENABLED", "
     "y",
 }
 RNPD_PREPROCESSED_CACHE_FILE = os.getenv("RNPD_PREPROCESSED_CACHE_FILE", str(BASE_DIR / "rnpd.preprocessed.json"))
-PREPROCESSED_SCHEMA_VERSION = 1
+PREPROCESSED_SCHEMA_VERSION = 4
 LOCAL_FALLBACK_CANDIDATES = [
     os.getenv("RNPD_LOCAL_FILE"),
+    str(BASE_DIR / "AI" / "Data" / "kd_z_nevarnost_enriched_verified.geojson"),
     str(BASE_DIR / "rnpd.json"),
     str(BASE_DIR.parent / "arnes-hackathon-frontend" / "src" / "data" / "rnpd.json"),
 ]
@@ -88,7 +89,6 @@ def list_heritage_sites(
         "items": [to_summary(site) for site in items],
         "total": len(filtered),
         "sourceCount": dataset["source_count"],
-        "sourceUrl": RNPD_SOURCE_URL,
     }
 
 
@@ -100,10 +100,15 @@ def get_heritage_site_details(site_id: str, *, refresh: bool = False) -> dict[st
     site = dataset["site_by_id"].get(site_id)
     if not site:
         return None
-    payload = to_summary(site)
-    payload["detailFields"] = site["detailFields"]
-    payload["sourceUrl"] = site["sourceUrl"]
-    return payload
+    return to_detail(site)
+
+
+def read_corrected_hazard(record: dict[str, Any], *keys: str) -> float | None:
+    value = pick_first(record, list(keys))
+    if value is None:
+        return None
+    parsed = to_number(value)
+    return round(float(parsed), 3) if parsed is not None else None
 
 
 def get_dataset(*, refresh: bool = False) -> dict[str, Any]:
@@ -417,6 +422,9 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
     )
     municipality = string_value(pick_first(source_with_geometry, ["obcina", "municipality", "upravna_enota", "naselje", "lokacija", "kraj"]))
     description = string_value(pick_first(source_with_geometry, ["opis", "kratki_opis", "description", "summary", "povzetek"]))
+    dating = string_value(pick_first(source_with_geometry, ["datacija", "dating"]))
+    location_description = string_value(pick_first(source_with_geometry, ["lokacijaopis", "lokacija_opis", "location_description"]))
+    photo_url = string_value(pick_first(source_with_geometry, ["photourl", "photo_url"]))
     elevation_m = to_number(
         string_value(
             pick_first(
@@ -425,6 +433,15 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
             )
         )
     )
+    fire_hazard = read_corrected_hazard(source_with_geometry, "pozar_ocena_popravljena", "fire_danger_revised")
+    flood_hazard = read_corrected_hazard(source_with_geometry, "poplave_ocena_popravljena", "flood_danger_revised")
+    landslide_hazard = read_corrected_hazard(source_with_geometry, "plazovi_ocena_popravljena", "landslide_danger_revised")
+    earthquake_hazard = read_corrected_hazard(source_with_geometry, "potres_ocena_popravljena", "earthquake_danger_revised")
+    fire_hazard_original = read_corrected_hazard(source_with_geometry, "pozar", "fire_danger")
+    flood_hazard_original = read_corrected_hazard(source_with_geometry, "poplave", "flood_danger")
+    landslide_hazard_original = read_corrected_hazard(source_with_geometry, "plazovi", "landslide_danger")
+    earthquake_hazard_original = read_corrected_hazard(source_with_geometry, "potres", "earthquake_danger")
+    combined_hazard = read_corrected_hazard(source_with_geometry, "skupaj_nevarnost", "combined_danger_score")
     site_id = string_value(registry_id) or f"{name}-{coordinates['lat']:.6f}-{coordinates['lng']:.6f}".lower()
 
     used_key_candidates = [
@@ -473,6 +490,36 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
         "lon",
         "long",
         "longitude",
+        "z",
+        "elevation",
+        "elevation_m",
+        "visina",
+        "visina_m",
+        "height",
+        "height_m",
+        "tip_najblizje_reke",
+        "rezim_toka_najblizje_reke",
+        "vrsta_najblizje_reke",
+        "visina_najblizje_reke_m",
+        "relativna_visina_nad_najblizjo_reko_m",
+        "lokalni_naklon_stopinje",
+        "lega_terena",
+        "dvignjena_terasa",
+        "pas_razdalje_do_reke",
+        "srednje_dalec",
+        "pas_razdalje_do_poplavnega_obmocja",
+        "ime_najblizje_reke",
+        "zanesljivost_konteksta_terena",
+        "metoda_konteksta_terena",
+        "uradna_ocena_poplav",
+        "ocena_blizine_poplav",
+        "pas_poplavne_nevarnosti",
+        "utemeljitev_poplav",
+        "razlicica_modela_poplav",
+        "utemeljitev_popravka_nevarnosti",
+        "status_preveritve",
+        "opombe_preveritve",
+        "viri",
         "x",
         "y",
         "x_wgs84",
@@ -486,6 +533,24 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
         "geometry_coordinates",
         "geom",
         "wkt",
+        "pozar",
+        "poplave",
+        "plazovi",
+        "potres",
+        "pozar_ocena_popravljena",
+        "poplave_ocena_popravljena",
+        "plazovi_ocena_popravljena",
+        "potres_ocena_popravljena",
+        "fire_danger",
+        "flood_danger",
+        "landslide_danger",
+        "earthquake_danger",
+        "fire_danger_revised",
+        "flood_danger_revised",
+        "landslide_danger_revised",
+        "earthquake_danger_revised",
+        "skupaj_nevarnost",
+        "combined_danger_score",
     ]
     used_keys = {normalize_key(value) for value in used_key_candidates if normalize_key(value)}
 
@@ -536,7 +601,19 @@ def normalize_record(record: Any, index: int) -> dict[str, Any] | None:
         "protectionStatus": protection_status or None,
         "municipality": municipality or None,
         "description": description or None,
+        "dating": dating or None,
+        "locationDescription": location_description or None,
+        "photoUrl": photo_url or None,
         "elevationM": round(float(elevation_m), 2) if elevation_m is not None else None,
+        "fireHazard": fire_hazard,
+        "floodHazard": flood_hazard,
+        "landslideHazard": landslide_hazard,
+        "earthquakeHazard": earthquake_hazard,
+        "fireHazardOriginal": fire_hazard_original,
+        "floodHazardOriginal": flood_hazard_original,
+        "landslideHazardOriginal": landslide_hazard_original,
+        "earthquakeHazardOriginal": earthquake_hazard_original,
+        "combinedHazard": combined_hazard,
         "detailFields": detail_fields,
         "searchNameNormalized": name_normalized,
         "searchMunicipalityNormalized": municipality_normalized,
@@ -557,10 +634,34 @@ def to_summary(site: dict[str, Any]) -> dict[str, Any]:
         "type": site.get("type"),
         "protectionStatus": site.get("protectionStatus"),
         "municipality": site.get("municipality"),
-        "description": site.get("description"),
-        "elevationM": site.get("elevationM"),
         "isCluster": site.get("isCluster"),
         "clusterCount": site.get("clusterCount"),
+    }
+
+
+def to_detail(site: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": site.get("id"),
+        "registryId": site.get("registryId"),
+        "name": site.get("name"),
+        "lat": site.get("lat"),
+        "lng": site.get("lng"),
+        "type": site.get("type"),
+        "protectionStatus": site.get("protectionStatus"),
+        "municipality": site.get("municipality"),
+        "isCluster": site.get("isCluster"),
+        "description": site.get("description"),
+        "dating": site.get("dating"),
+        "locationDescription": site.get("locationDescription"),
+        "photoUrl": site.get("photoUrl"),
+        "fireHazard": site.get("fireHazard"),
+        "floodHazard": site.get("floodHazard"),
+        "landslideHazard": site.get("landslideHazard"),
+        "earthquakeHazard": site.get("earthquakeHazard"),
+        "fireHazardOriginal": site.get("fireHazardOriginal"),
+        "floodHazardOriginal": site.get("floodHazardOriginal"),
+        "landslideHazardOriginal": site.get("landslideHazardOriginal"),
+        "earthquakeHazardOriginal": site.get("earthquakeHazardOriginal"),
     }
 
 
