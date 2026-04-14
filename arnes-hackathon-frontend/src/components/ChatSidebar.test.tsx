@@ -83,6 +83,110 @@ describe("ChatSidebar", () => {
 		expect(secondCall?.[1]?.body).toContain("What is happening near Ptuj?");
 	});
 
+	it("resets the conversation and sends the next request without previous history", async () => {
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						items: [
+							{
+								id: "mdml-gpt5-2-001",
+								label: "MDML-GPT5.2-001",
+								deployment: "MDML-GPT5.2-001",
+								available: true,
+								supportsWebSearch: true,
+								isDefault: true,
+								missingEnv: [],
+							},
+						],
+						defaultModelId: "mdml-gpt5-2-001",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						model: {
+							id: "mdml-gpt5-2-001",
+							label: "MDML-GPT5.2-001",
+							deployment: "MDML-GPT5.2-001",
+							available: true,
+							supportsWebSearch: true,
+							isDefault: true,
+							missingEnv: [],
+						},
+						message: {
+							role: "assistant",
+							content: "First reply.",
+						},
+						citations: [],
+						webSearchUsed: false,
+						responseId: "resp_chat_first",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						model: {
+							id: "mdml-gpt5-2-001",
+							label: "MDML-GPT5.2-001",
+							deployment: "MDML-GPT5.2-001",
+							available: true,
+							supportsWebSearch: true,
+							isDefault: true,
+							missingEnv: [],
+						},
+						message: {
+							role: "assistant",
+							content: "Second reply.",
+						},
+						citations: [],
+						webSearchUsed: false,
+						responseId: "resp_chat_second",
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+		render(<ChatSidebar />);
+
+		await screen.findByRole("option", { name: "MDML-GPT5.2-001" });
+
+		fireEvent.change(screen.getByRole("textbox", { name: /ask the ai assistant about heritage risks/i }), {
+			target: { value: "First question" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+		expect(await screen.findByText("First reply.")).toBeInTheDocument();
+		expect(screen.getByText("First question")).toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole("button", { name: /start a new chat/i }));
+
+		expect(screen.queryByText("First question")).not.toBeInTheDocument();
+		expect(screen.queryByText("First reply.")).not.toBeInTheDocument();
+
+		fireEvent.change(screen.getByRole("textbox", { name: /ask the ai assistant about heritage risks/i }), {
+			target: { value: "Second question" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /send message/i }));
+
+		expect(await screen.findByText("Second reply.")).toBeInTheDocument();
+
+		await waitFor(() => {
+			expect(fetchMock).toHaveBeenCalledTimes(3);
+		});
+
+		const thirdCall = fetchMock.mock.calls[2];
+		expect(thirdCall?.[0]).toContain("/api/chat");
+		expect(thirdCall?.[1]?.body).toContain("Second question");
+		expect(thirdCall?.[1]?.body).not.toContain("First question");
+		expect(thirdCall?.[1]?.body).not.toContain("First reply.");
+	});
+
 	it("only shows GPT 5.2 and GaMS models and lets the user switch between them", async () => {
 		const fetchMock = vi
 			.spyOn(globalThis, "fetch")

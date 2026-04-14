@@ -9,7 +9,7 @@ import {
 import SafeHtmlContent from "@/components/SafeHtmlContent";
 import { EXPLAIN_SITE_EVENT, type ExplainSiteEventDetail } from "@/components/chat-events";
 import { useLanguage } from "@/lib/i18n";
-import { Bot, RefreshCcw, Send, User } from "lucide-react";
+import { Bot, Send, User } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 const CHAT_INPUT_ID = "heritage-chat-input";
@@ -250,9 +250,9 @@ const ChatSidebar = () => {
 					onClick={handleResetConversation}
 					disabled={loading}
 					aria-label={m.chat.resetConversationAria}
-					className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
+					className="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-40"
 				>
-					<RefreshCcw className="h-4 w-4" aria-hidden="true" />
+					{m.chat.newChat}
 				</button>
 			</div>
 
@@ -361,7 +361,7 @@ const ChatSidebar = () => {
 				<label htmlFor={CHAT_INPUT_ID} className="sr-only">
 					{m.chat.inputLabel}
 				</label>
-				<div className="flex items-end gap-2">
+				<div className="flex gap-2">
 					<div className="flex-1 overflow-hidden rounded-md bg-secondary focus-within:ring-1 focus-within:ring-ring">
 						<textarea
 							ref={composerRef}
@@ -389,7 +389,7 @@ const ChatSidebar = () => {
 						onClick={handleSend}
 						disabled={!canSend}
 						aria-label={m.chat.sendMessageAria}
-						className="self-end rounded-md bg-primary p-2 text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+						className="self-stretch rounded-md bg-primary px-4 text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
 					>
 						<Send className="h-4 w-4" aria-hidden="true" />
 					</button>
